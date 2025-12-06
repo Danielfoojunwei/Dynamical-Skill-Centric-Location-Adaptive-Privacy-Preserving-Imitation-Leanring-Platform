@@ -1,0 +1,5 @@
+
+# Local files - do not commit
+.env
+system.log
+*.log
