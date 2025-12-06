@@ -1039,36 +1039,88 @@ class BodyGloveFusion:
 class WholeBodyRetargetingPipeline:
     """
     Complete whole-body retargeting pipeline.
-    
+
     Integrates:
     1. RTMPose inference on camera images
-    2. Multi-view triangulation
-    3. Pose quality scoring
-    4. GMR whole-body retargeting
-    5. DYGlove hand fusion
+    2. Depth Anything V3 depth estimation (optional)
+    3. Multi-view triangulation with depth refinement
+    4. Pose quality scoring
+    5. GMR whole-body retargeting
+    6. DYGlove hand fusion
     """
-    
+
     def __init__(
         self,
         pose_config: PoseEstimationConfig = None,
         robot_config: GMRRobotConfig = None,
         cameras: Dict[str, CameraParams] = None,
+        enable_depth_estimation: bool = True,
     ):
         self.pose_config = pose_config or PoseEstimationConfig()
         self.robot_config = robot_config or GMRRobotConfig()
-        
+        self.enable_depth_estimation = enable_depth_estimation
+
         # Components
         self.pose_estimator = self._create_pose_estimator()
         self.triangulator = MultiViewTriangulator(cameras or {})
         self.quality_scorer = PoseQualityScorer()
         self.gmr_retargeter = GMRRetargeterReal(self.robot_config)
         self.body_glove_fusion = BodyGloveFusion()
-        
+
+        # Depth estimation components (Depth Anything V3)
+        self.depth_estimator = None
+        self.depth_pose_fusion = None
+        self._camera_intrinsics: Dict[str, Any] = {}
+
+        if enable_depth_estimation:
+            self._init_depth_estimation()
+
         # State
         self._current_q: Optional[np.ndarray] = None
         self._last_pose_3d: Optional[Pose3DResult] = None
-        
-        logger.info("WholeBodyRetargetingPipeline initialized")
+
+        logger.info(f"WholeBodyRetargetingPipeline initialized (depth={enable_depth_estimation})")
+
+    def _init_depth_estimation(self):
+        """Initialize Depth Anything V3 for improved 3D estimation."""
+        try:
+            from src.core.depth_estimation import (
+                DepthAnythingV3,
+                DepthEstimationConfig,
+                DepthPoseFusion,
+                DepthFusionConfig,
+            )
+            from src.core.depth_estimation.depth_anything_v3 import DepthModelSize, DepthPrecision
+
+            # Configure depth estimation
+            depth_config = DepthEstimationConfig(
+                model_size=DepthModelSize.LARGE,
+                precision=DepthPrecision.FP16,
+                enable_sky_detection=True,
+            )
+
+            self.depth_estimator = DepthAnythingV3(depth_config)
+            self.depth_pose_fusion = DepthPoseFusion(DepthFusionConfig())
+
+            logger.info("Depth Anything V3 initialized for enhanced 3D estimation")
+
+        except ImportError as e:
+            logger.warning(f"Depth estimation not available: {e}")
+            self.enable_depth_estimation = False
+        except Exception as e:
+            logger.warning(f"Failed to initialize depth estimation: {e}")
+            self.enable_depth_estimation = False
+
+    def set_camera_intrinsics(self, camera_id: str, fx: float, fy: float, cx: float, cy: float,
+                               width: int, height: int):
+        """Set camera intrinsics for depth-based 3D estimation."""
+        try:
+            from src.core.depth_estimation.depth_pose_fusion import CameraIntrinsics
+            self._camera_intrinsics[camera_id] = CameraIntrinsics(
+                fx=fx, fy=fy, cx=cx, cy=cy, width=width, height=height
+            )
+        except ImportError:
+            pass
     
     def _create_pose_estimator(self) -> RTMPoseInference:
         """Create appropriate pose estimator based on config."""
@@ -1085,42 +1137,67 @@ class WholeBodyRetargetingPipeline:
     ) -> Dict[str, Any]:
         """
         Process a set of camera images and glove state.
-        
+
         Args:
             images: Dict mapping camera_id to image array
             glove_state: Optional DYGlove state
             active_hand: Which hand is active ('left' or 'right')
-        
+
         Returns:
             Dict with:
             - robot_q: Robot joint configuration
             - gripper_cmd: Gripper command
             - pose_3d: 3D pose result
+            - depth_maps: Dict of depth maps (if depth estimation enabled)
             - quality: Quality metrics
         """
         timestamp = time.time()
-        
+
         # Step 1: 2D pose estimation on all cameras
         pose_2d_results = {}
         for cam_id, image in images.items():
             pose_2d = self.pose_estimator.infer(image, cam_id)
             pose_2d_results[cam_id] = pose_2d
-        
-        # Step 2: Triangulate to 3D
+
+        # Step 1.5: Depth estimation on all cameras (if enabled)
+        depth_results = {}
+        if self.enable_depth_estimation and self.depth_estimator is not None:
+            for cam_id, image in images.items():
+                try:
+                    # Get focal length from camera params if available
+                    focal_length = None
+                    if cam_id in self.triangulator.cameras:
+                        K = self.triangulator.cameras[cam_id].K
+                        focal_length = (K[0, 0] + K[1, 1]) / 2
+
+                    depth_result = self.depth_estimator.infer(image, focal_length)
+                    depth_results[cam_id] = depth_result
+                except Exception as e:
+                    logger.debug(f"Depth estimation failed for {cam_id}: {e}")
+
+        # Step 2: Triangulate to 3D (with optional depth refinement)
         if len(pose_2d_results) >= 2 and len(self.triangulator.cameras) >= 2:
+            # Multi-camera: use triangulation
             pose_3d = self.triangulator.triangulate(pose_2d_results)
+
+            # Refine with depth if available
+            if depth_results and self.depth_pose_fusion is not None:
+                try:
+                    pose_3d = self.depth_pose_fusion.refine_with_depth(
+                        pose_3d,
+                        pose_2d_results,
+                        depth_results,
+                        self._camera_intrinsics,
+                    )
+                except Exception as e:
+                    logger.debug(f"Depth refinement failed: {e}")
+
         else:
-            # Single camera: use 2D with depth heuristics
-            pose_3d = Pose3DResult.empty()
-            if pose_2d_results:
-                first = next(iter(pose_2d_results.values()))
-                if first.num_persons > 0:
-                    # Approximate depth (very rough)
-                    kp_2d = first.keypoints[0]
-                    pose_3d.keypoints_3d[:len(kp_2d), :2] = kp_2d[:, :2] / 500.0  # Scale to meters
-                    pose_3d.keypoints_3d[:len(kp_2d), 2] = 2.0  # Assume 2m depth
-                    pose_3d.keypoint_confidence[:len(kp_2d)] = kp_2d[:, 2]
-        
+            # Single camera: use Depth Anything V3 for 3D estimation
+            pose_3d = self._estimate_3d_single_camera(
+                pose_2d_results, depth_results, images
+            )
+
         self._last_pose_3d = pose_3d
         
         # Step 3: Quality scoring
@@ -1159,10 +1236,112 @@ class WholeBodyRetargetingPipeline:
             'gripper_cmd': gripper_cmd,
             'pose_3d': pose_3d,
             'pose_2d': pose_2d_results,
+            'depth_maps': depth_results,
             'quality': quality,
             'fused_hand': fused_hand,
         }
-    
+
+    def _estimate_3d_single_camera(
+        self,
+        pose_2d_results: Dict[str, Pose2DResult],
+        depth_results: Dict[str, Any],
+        images: Dict[str, np.ndarray],
+    ) -> Pose3DResult:
+        """
+        Estimate 3D pose from single camera using Depth Anything V3.
+
+        This replaces the old hardcoded "2m depth" assumption with real
+        per-pixel depth values.
+        """
+        pose_3d = Pose3DResult.empty()
+
+        if not pose_2d_results:
+            return pose_3d
+
+        # Get first camera's data
+        cam_id = next(iter(pose_2d_results.keys()))
+        pose_2d = pose_2d_results[cam_id]
+
+        if pose_2d.num_persons == 0:
+            return pose_3d
+
+        # Check if we have depth and fusion available
+        if (self.enable_depth_estimation and
+            self.depth_pose_fusion is not None and
+            cam_id in depth_results):
+
+            # Use Depth Anything V3 for accurate 3D estimation
+            try:
+                depth_result = depth_results[cam_id]
+
+                # Get or create camera intrinsics
+                if cam_id in self._camera_intrinsics:
+                    intrinsics = self._camera_intrinsics[cam_id]
+                elif cam_id in self.triangulator.cameras:
+                    # Create from camera params
+                    from src.core.depth_estimation.depth_pose_fusion import CameraIntrinsics
+                    cam_params = self.triangulator.cameras[cam_id]
+                    intrinsics = CameraIntrinsics.from_matrix(
+                        cam_params.K,
+                        cam_params.image_size[0],
+                        cam_params.image_size[1]
+                    )
+                else:
+                    # Create default intrinsics
+                    from src.core.depth_estimation.depth_pose_fusion import create_intrinsics_from_fov
+                    h, w = images[cam_id].shape[:2]
+                    intrinsics = create_intrinsics_from_fov(w, h, fov_horizontal=60)
+
+                # Fuse depth with 2D pose for 3D estimation
+                fused = self.depth_pose_fusion.estimate_from_depth(
+                    pose_2d, depth_result, intrinsics
+                )
+
+                # Convert FusedPose3D to Pose3DResult
+                n_kp = min(len(fused.keypoints_3d), len(pose_3d.keypoints_3d))
+                pose_3d.keypoints_3d[:n_kp] = fused.keypoints_3d[:n_kp]
+                pose_3d.keypoint_confidence[:n_kp] = fused.keypoint_confidence[:n_kp]
+                pose_3d.quality_score = fused.valid_keypoint_ratio
+
+                logger.debug(f"Depth-based 3D estimation: {fused.valid_keypoint_ratio:.1%} valid")
+                return pose_3d
+
+            except Exception as e:
+                logger.warning(f"Depth-based 3D estimation failed: {e}, using fallback")
+
+        # Fallback: Old method (rough approximation)
+        # This should rarely be used now that depth estimation is available
+        kp_2d = pose_2d.keypoints[0]
+        n_kp = min(len(kp_2d), len(pose_3d.keypoints_3d))
+
+        # Estimate approximate depth from bounding box size
+        # Larger bbox = closer person
+        bbox = pose_2d.bboxes[0] if len(pose_2d.bboxes) > 0 else None
+        if bbox is not None:
+            bbox_height = bbox[3] - bbox[1]
+            # Assume average human height ~1.7m, estimate depth
+            # This is much better than fixed 2m but still approximate
+            estimated_depth = max(1.0, min(5.0, 1000.0 / max(bbox_height, 100)))
+        else:
+            estimated_depth = 2.0  # Fallback to fixed depth
+
+        for i in range(n_kp):
+            x, y, conf = kp_2d[i]
+            if conf > 0.3:
+                # Simple back-projection with estimated depth
+                # Assume 60° FOV camera
+                img_w, img_h = pose_2d.image_size
+                fx = img_w / (2 * np.tan(np.radians(30)))
+
+                X = (x - img_w / 2) * estimated_depth / fx
+                Y = (y - img_h / 2) * estimated_depth / fx
+                Z = estimated_depth
+
+                pose_3d.keypoints_3d[i] = [X, Y, Z]
+                pose_3d.keypoint_confidence[i] = conf * 0.5  # Lower confidence for fallback
+
+        return pose_3d
+
     def add_camera(self, camera_id: str, params: CameraParams):
         """Add a camera for triangulation."""
         self.triangulator.cameras[camera_id] = params
