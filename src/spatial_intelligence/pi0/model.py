@@ -1,10 +1,22 @@
-"""Pi0: A Vision-Language-Action Flow Model for General Robot Control (AGX Orin Port)."""
+"""
+Pi0: A Vision-Language-Action Flow Model for General Robot Control (AGX Orin Port).
+
+This module implements the Pi0 model from Physical Intelligence for embodied AI.
+
+IMPORTANT: This module requires PyTorch and Transformers to be installed.
+Install with: pip install torch torchvision transformers
+
+References:
+- Physical Intelligence: https://www.physicalintelligence.company/
+- PaliGemma: https://huggingface.co/google/paligemma-3b-pt-224
+"""
 
 import logging
 import os
 import time
 from typing import Optional, List, Dict, Any
 
+# Require PyTorch - no mock fallback for production
 try:
     import torch
     import torch.nn as nn
@@ -13,83 +25,21 @@ try:
     HAS_TORCH = True
 except ImportError:
     HAS_TORCH = False
-    # Mock torch
-    class MockModule:
-        def __init__(self, *args, **kwargs): pass
-        def __call__(self, *args, **kwargs): return MockTensor()
-        def to(self, *args, **kwargs): return self
-        def parameters(self): return []
-        def state_dict(self): return {}
-        def load_state_dict(self, *args, **kwargs): pass
-        def get_input_embeddings(self): return MockModule()
-        
-    class MockTensor:
-        def __init__(self, *args, **kwargs): pass
-        def size(self, *args): return 1
-        @property
-        def shape(self): return (1, 1, 1, 1, 1)
-        def to(self, *args, **kwargs): return self
-        def unsqueeze(self, *args): return self
-        def expand(self, *args): return self
-        def type(self, *args): return self
-        def __getitem__(self, *args): return self
-        def __setitem__(self, *args): pass
-        def __add__(self, other): return self
-        def __mul__(self, other): return self
-        def __sub__(self, other): return self
-        def __truediv__(self, other): return self
-        
-    class MockLib:
-        pass
-        
-    torch = MockLib()
-    nn = MockLib()
-    torch.nn = nn
-    nn.Module = MockModule
-    nn.Linear = MockModule
-    nn.Sequential = MockModule
-    torch.Tensor = MockTensor
-    torch.float32 = "float32"
-    torch.float16 = "float16"
-    torch.device = lambda x: x
-    torch.randn = lambda *args, **kwargs: MockTensor()
-    torch.zeros = lambda *args, **kwargs: MockTensor()
-    torch.arange = lambda *args, **kwargs: MockTensor()
-    torch.stack = lambda *args, **kwargs: MockTensor()
-    torch.cat = lambda *args, **kwargs: MockTensor()
-    torch.where = lambda *args: MockTensor()
-    torch.finfo = lambda x: type('obj', (object,), {'min': 0})
-    torch.no_grad = lambda: type('obj', (object,), {'__enter__': lambda x: None, '__exit__': lambda x,y,z: None})()
-    
-    class MockDist:
-        def __init__(self, *args): pass
-    torch.distributions = MockLib()
-    torch.distributions.Beta = MockDist
-    torch.dtype = type
-    
-    T = MockLib()
-    T.Resize = MockModule
+    raise ImportError(
+        "PyTorch is required for Pi0 model. "
+        "Install with: pip install torch torchvision"
+    )
 
+# Require Transformers for VLM backbone
 try:
     from transformers import AutoProcessor, AutoTokenizer, PaliGemmaForConditionalGeneration
     HAS_TRANSFORMERS = True
 except ImportError:
     HAS_TRANSFORMERS = False
-    # Mock transformers
-    class MockTransformer:
-        def __init__(self, *args, **kwargs): 
-            self.config = type('obj', (object,), {'text_config': type('obj', (object,), {'intermediate_size': 16384, 'hidden_size': 2048})()})()
-            self.model = type('obj', (object,), {})()
-            self.model.language_model = type('obj', (object,), {'state_dict': lambda *args, **kwargs: {}})()
-            self.model.get_image_features = lambda x: MockTensor()
-        @classmethod
-        def from_pretrained(cls, *args, **kwargs): return cls()
-        def get_input_embeddings(self): return MockModule()
-        def parameters(self): return []
-        
-    AutoProcessor = MockTransformer
-    AutoTokenizer = MockTransformer
-    PaliGemmaForConditionalGeneration = MockTransformer
+    raise ImportError(
+        "Transformers is required for Pi0 model. "
+        "Install with: pip install transformers"
+    )
 
 from .modules import ActionEncoder, GemmaMoE, MoeExpertConfig, SinusoidalPosEmb
 
