@@ -2202,6 +2202,337 @@ async def export_project(project_id: str, user: User = Depends(get_current_user)
 
 
 # =============================================================================
+# Skills API (MoE Skill Router with Encrypted Storage)
+# =============================================================================
+
+# Import skill router
+try:
+    from src.platform.cloud.moe_skill_router import (
+        CloudSkillService, SkillRequest, SkillType, SkillStatus
+    )
+    HAS_SKILL_ROUTER = True
+except ImportError:
+    HAS_SKILL_ROUTER = False
+    logger.warning("Skill router not available")
+
+# Initialize skill service
+if HAS_SKILL_ROUTER:
+    skill_service = CloudSkillService(
+        storage_dir=os.path.join(settings.DATA_DIR, "skills"),
+        use_encryption=True,
+        num_experts=16,
+        embedding_dim=512,
+    )
+else:
+    skill_service = None
+
+
+class SkillCreate(BaseModel):
+    """Skill creation request."""
+    name: str
+    description: str
+    skill_type: str  # manipulation, navigation, perception, coordination, locomotion
+    version: str = "1.0.0"
+    tags: List[str] = []
+    training_config: Dict[str, Any] = {}
+
+
+class SkillRequestBody(BaseModel):
+    """Skill request body."""
+    task_description: str
+    task_embedding: Optional[List[float]] = None
+    required_skill_types: List[str] = []
+    max_skills: int = 5
+    device_id: str = ""
+
+
+class SkillDeployRequest(BaseModel):
+    """Skill deployment request."""
+    skill_ids: List[str]
+    device_ids: List[str]
+
+
+class SkillResponse(BaseModel):
+    """Skill response."""
+    id: str
+    name: str
+    description: str
+    skill_type: str
+    version: str
+    status: str
+    is_encrypted: bool
+    file_size_bytes: int
+    created_at: str
+    deployed_to: List[str] = []
+
+
+@app.post("/api/v1/skills", response_model=SkillResponse, tags=["Skills"])
+async def register_skill(
+    request: SkillCreate,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Register a new skill with encrypted storage.
+
+    Skills are robot manipulation primitives (grasp, pour, place, etc.) that
+    can be dynamically loaded and combined using MoE routing for task execution.
+
+    The skill weights should be uploaded separately via file upload endpoint.
+    """
+    if not HAS_SKILL_ROUTER or not skill_service:
+        raise HTTPException(status_code=503, detail="Skill service not available")
+
+    import numpy as np
+
+    # Map string to SkillType enum
+    try:
+        skill_type = SkillType(request.skill_type)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid skill type. Valid types: {[t.value for t in SkillType]}"
+        )
+
+    # Create placeholder weights (actual weights uploaded separately)
+    placeholder_weights = np.random.randn(1000).astype(np.float32)
+
+    metadata = skill_service.register_skill(
+        name=request.name,
+        description=request.description,
+        skill_type=skill_type,
+        weights=placeholder_weights,
+        config=request.training_config,
+        version=request.version,
+        tags=request.tags,
+    )
+
+    storage.add_audit_log(
+        current_user.id, current_user.organization_id, AuditAction.CREATE,
+        "skill", metadata.id, {"name": request.name}
+    )
+
+    return SkillResponse(
+        id=metadata.id,
+        name=metadata.name,
+        description=metadata.description,
+        skill_type=metadata.skill_type.value,
+        version=metadata.version,
+        status=metadata.status.value,
+        is_encrypted=metadata.is_encrypted,
+        file_size_bytes=metadata.file_size_bytes,
+        created_at=metadata.created_at,
+        deployed_to=metadata.deployed_to,
+    )
+
+
+@app.get("/api/v1/skills", tags=["Skills"])
+async def list_skills(
+    skill_type: Optional[str] = None,
+    status: Optional[str] = None,
+    current_user: User = Depends(get_current_user)
+):
+    """List all available skills."""
+    if not HAS_SKILL_ROUTER or not skill_service:
+        raise HTTPException(status_code=503, detail="Skill service not available")
+
+    # Parse filters
+    type_filter = SkillType(skill_type) if skill_type else None
+    status_filter = SkillStatus(status) if status else None
+
+    skills = skill_service.storage.list_skills(
+        skill_type=type_filter,
+        status=status_filter,
+    )
+
+    return {
+        "skills": [
+            {
+                "id": s.id,
+                "name": s.name,
+                "description": s.description,
+                "skill_type": s.skill_type.value,
+                "version": s.version,
+                "status": s.status.value,
+                "is_encrypted": s.is_encrypted,
+                "success_rate": s.success_rate,
+                "deployed_to": s.deployed_to,
+            }
+            for s in skills
+        ],
+        "count": len(skills),
+    }
+
+
+@app.get("/api/v1/skills/{skill_id}", tags=["Skills"])
+async def get_skill(
+    skill_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Get skill details including encrypted weights.
+
+    The encrypted weights can be decrypted on the edge device using the
+    device-specific N2HE keys.
+    """
+    if not HAS_SKILL_ROUTER or not skill_service:
+        raise HTTPException(status_code=503, detail="Skill service not available")
+
+    encrypted_skill = skill_service.storage.get_skill(skill_id)
+
+    if not encrypted_skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    import base64
+
+    return {
+        "metadata": {
+            "id": encrypted_skill.metadata.id,
+            "name": encrypted_skill.metadata.name,
+            "description": encrypted_skill.metadata.description,
+            "skill_type": encrypted_skill.metadata.skill_type.value,
+            "version": encrypted_skill.metadata.version,
+            "status": encrypted_skill.metadata.status.value,
+            "is_encrypted": encrypted_skill.metadata.is_encrypted,
+            "file_size_bytes": encrypted_skill.metadata.file_size_bytes,
+            "file_hash": encrypted_skill.metadata.file_hash,
+            "created_at": encrypted_skill.metadata.created_at,
+            "deployed_to": encrypted_skill.metadata.deployed_to,
+        },
+        "encrypted_weights": base64.b64encode(encrypted_skill.encrypted_weights).decode(),
+        "encrypted_config": base64.b64encode(encrypted_skill.encrypted_config).decode(),
+        "encryption_params": encrypted_skill.encryption_params,
+        "public_key_hash": encrypted_skill.public_key_hash,
+    }
+
+
+@app.post("/api/v1/skills/request", tags=["Skills"])
+async def request_skills(
+    request: SkillRequestBody,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Request skills for a task using MoE routing.
+
+    Given a task description or embedding, the MoE router selects the most
+    appropriate skills and returns them with routing weights for blending.
+    """
+    if not HAS_SKILL_ROUTER or not skill_service:
+        raise HTTPException(status_code=503, detail="Skill service not available")
+
+    from src.platform.cloud.moe_skill_router import SkillRequest as SkillRequestModel
+
+    # Map skill types
+    required_types = []
+    for t in request.required_skill_types:
+        try:
+            required_types.append(SkillType(t))
+        except ValueError:
+            pass
+
+    skill_request = SkillRequestModel(
+        task_description=request.task_description,
+        task_embedding=request.task_embedding,
+        device_id=request.device_id,
+        required_skill_types=required_types,
+        max_skills=request.max_skills,
+    )
+
+    response = skill_service.request_skills(skill_request)
+
+    import base64
+
+    storage.add_audit_log(
+        current_user.id, current_user.organization_id, AuditAction.READ,
+        "skill", "moe_request", {"task": request.task_description[:100]}
+    )
+
+    return {
+        "skills": [
+            {
+                "metadata": {
+                    "id": s.metadata.id,
+                    "name": s.metadata.name,
+                    "description": s.metadata.description,
+                    "skill_type": s.metadata.skill_type.value,
+                    "version": s.metadata.version,
+                },
+                "encrypted_weights": base64.b64encode(s.encrypted_weights).decode(),
+                "encrypted_config": base64.b64encode(s.encrypted_config).decode(),
+                "encryption_params": s.encryption_params,
+            }
+            for s in response.skills
+        ],
+        "routing_weights": response.routing_weights,
+        "task_embedding": response.task_embedding,
+        "inference_time_ms": response.inference_time_ms,
+    }
+
+
+@app.post("/api/v1/skills/deploy", tags=["Skills"])
+async def deploy_skills(
+    request: SkillDeployRequest,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Deploy skills to edge devices.
+
+    This marks the skills as deployed and records which edge devices
+    have access to them.
+    """
+    if not HAS_SKILL_ROUTER or not skill_service:
+        raise HTTPException(status_code=503, detail="Skill service not available")
+
+    results = skill_service.deploy_to_edge(
+        skill_ids=request.skill_ids,
+        device_ids=request.device_ids,
+    )
+
+    storage.add_audit_log(
+        current_user.id, current_user.organization_id, AuditAction.DEPLOY,
+        "skill", ",".join(request.skill_ids), {"devices": request.device_ids}
+    )
+
+    return {
+        "results": results,
+        "deployed_count": sum(1 for v in results.values() if v),
+        "failed_count": sum(1 for v in results.values() if not v),
+    }
+
+
+@app.delete("/api/v1/skills/{skill_id}", tags=["Skills"])
+async def delete_skill(
+    skill_id: str,
+    current_user: User = Depends(require_role([UserRole.ADMIN]))
+):
+    """Delete a skill (admin only)."""
+    if not HAS_SKILL_ROUTER or not skill_service:
+        raise HTTPException(status_code=503, detail="Skill service not available")
+
+    success = skill_service.storage.delete_skill(skill_id)
+
+    if not success:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    storage.add_audit_log(
+        current_user.id, current_user.organization_id, AuditAction.DELETE,
+        "skill", skill_id, {}
+    )
+
+    return {"status": "deleted", "skill_id": skill_id}
+
+
+@app.get("/api/v1/skills/statistics", tags=["Skills"])
+async def get_skill_statistics(
+    current_user: User = Depends(get_current_user)
+):
+    """Get skill service statistics."""
+    if not HAS_SKILL_ROUTER or not skill_service:
+        raise HTTPException(status_code=503, detail="Skill service not available")
+
+    return skill_service.get_service_statistics()
+
+
+# =============================================================================
 # Main
 # =============================================================================
 
