@@ -42,14 +42,14 @@ class MoaiFHEConfig:
     ciphertext_modulus: int = 2**32
     plaintext_modulus: int = 2**16
     noise_std: float = 3.2
-    
+
     # MOAI parameters
     d_model: int = 256
     n_heads: int = 8
     max_seq_len: int = 64
-    
+
     # System parameters
-    use_mock: bool = True
+    use_mock: bool = False  # Default to real FHE encryption
     batch_size: int = 32
     encryption_workers: int = 4
 
@@ -57,14 +57,14 @@ class MoaiFHEConfig:
 class MoaiFHEContext:
     """
     FHE context for MOAI transformer operations.
-    
+
     Provides:
     - Column-packed matrix encryption (for attention)
     - Linear combination (for MLP layers)
     - Optional bootstrapping (for activations)
     """
-    
-    def __init__(self, config: MoaiFHEConfig = None, use_mock: bool = True):
+
+    def __init__(self, config: MoaiFHEConfig = None, use_mock: bool = False):
         self.config = config or MoaiFHEConfig(use_mock=use_mock)
         
         # Create N2HE context
@@ -259,14 +259,14 @@ class MoaiTransformerFHE:
 class MoaiFHESystem:
     """
     Complete MOAI FHE system for edge-to-cloud encrypted inference.
-    
+
     Provides:
     - Async encryption pipeline
     - Batch processing
     - Statistics and monitoring
     """
-    
-    def __init__(self, config: MoaiFHEConfig = None, use_mock: bool = True):
+
+    def __init__(self, config: MoaiFHEConfig = None, use_mock: bool = False):
         self.config = config or MoaiFHEConfig(use_mock=use_mock)
         self.context = MoaiFHEContext(self.config, use_mock=use_mock)
         
