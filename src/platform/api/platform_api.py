@@ -2533,6 +2533,173 @@ async def get_skill_statistics(
 
 
 # =============================================================================
+# Federated Learning API
+# =============================================================================
+
+# Initialize FL server
+try:
+    from src.platform.cloud.federated_learning import (
+        FederatedLearningServer,
+        FLConfig,
+        EdgeFLClient,
+        create_fl_endpoints,
+    )
+    HAS_FL = True
+    fl_config = FLConfig(
+        min_clients=2,
+        use_secure_aggregation=True,
+        use_differential_privacy=True,
+        dp_epsilon=1.0,
+    )
+    fl_server = FederatedLearningServer(fl_config)
+    logger.info("[Platform] Federated Learning server initialized")
+except ImportError as e:
+    HAS_FL = False
+    fl_server = None
+    logger.warning(f"[Platform] Federated Learning not available: {e}")
+
+
+class FLRegisterRequest(BaseModel):
+    client_id: str
+    device_type: str = "jetson_orin"
+
+
+class FLUpdateRequest(BaseModel):
+    client_id: str
+    gradients: str  # hex-encoded bytes
+    num_samples: int
+    round_num: int
+    encrypted: bool = False
+
+
+@app.post("/api/v1/fl/register", tags=["Federated Learning"])
+async def fl_register(request: FLRegisterRequest):
+    """
+    Register a federated learning client.
+
+    Edge devices (Jetson Orin) call this endpoint to join the FL cluster.
+    Returns public encryption context for secure gradient uploads.
+    """
+    if not HAS_FL or not fl_server:
+        raise HTTPException(status_code=503, detail="Federated learning not available")
+
+    result = fl_server.register_client(request.client_id, request.device_type)
+
+    # Convert bytes to hex for JSON serialization
+    if result.get('public_context'):
+        result['public_context'] = result['public_context'].hex()
+
+    return result
+
+
+@app.post("/api/v1/fl/update", tags=["Federated Learning"])
+async def fl_submit_update(request: FLUpdateRequest):
+    """
+    Submit encrypted gradient update from edge device.
+
+    Gradients are encrypted with TenSEAL (CKKS scheme) for secure aggregation.
+    The server performs homomorphic aggregation without decrypting individual updates.
+    """
+    if not HAS_FL or not fl_server:
+        raise HTTPException(status_code=503, detail="Federated learning not available")
+
+    try:
+        gradients = bytes.fromhex(request.gradients)
+        return fl_server.submit_update(
+            client_id=request.client_id,
+            gradients=gradients,
+            num_samples=request.num_samples,
+            round_num=request.round_num,
+            encrypted=request.encrypted,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/v1/fl/model", tags=["Federated Learning"])
+async def fl_get_model(client_id: str = None):
+    """
+    Get current global model.
+
+    Edge devices call this to download the latest aggregated model.
+    Model weights are compressed with gzip and hex-encoded.
+    """
+    if not HAS_FL or not fl_server:
+        raise HTTPException(status_code=503, detail="Federated learning not available")
+
+    response = fl_server.get_model(client_id)
+
+    # Convert bytes to hex for JSON serialization
+    if response.get('weights'):
+        response['weights'] = response['weights'].hex()
+
+    return response
+
+
+@app.get("/api/v1/fl/status", tags=["Federated Learning"])
+async def fl_status():
+    """
+    Get federated learning server status.
+
+    Returns:
+    - Number of registered/active clients
+    - Current model version
+    - Training statistics
+    - Privacy budget usage
+    """
+    if not HAS_FL or not fl_server:
+        raise HTTPException(status_code=503, detail="Federated learning not available")
+
+    return fl_server.get_status()
+
+
+@app.get("/api/v1/fl/privacy", tags=["Federated Learning"])
+async def fl_privacy_budget():
+    """
+    Get differential privacy budget usage.
+
+    Shows how much privacy budget (epsilon) has been spent across training rounds.
+    Important for compliance with privacy requirements.
+    """
+    if not HAS_FL or not fl_server:
+        raise HTTPException(status_code=503, detail="Federated learning not available")
+
+    if fl_server.dp:
+        return fl_server.dp.get_privacy_spent()
+    else:
+        return {"status": "Differential privacy not enabled"}
+
+
+@app.post("/api/v1/fl/start", tags=["Federated Learning"])
+async def fl_start_training(
+    current_user: User = Depends(require_role([UserRole.ADMIN]))
+):
+    """
+    Start federated learning training (admin only).
+
+    Begins accepting gradient updates from edge devices and
+    performing secure aggregation rounds.
+    """
+    if not HAS_FL or not fl_server:
+        raise HTTPException(status_code=503, detail="Federated learning not available")
+
+    fl_server.start()
+    return {"status": "started", "config": fl_server.config.__dict__}
+
+
+@app.post("/api/v1/fl/stop", tags=["Federated Learning"])
+async def fl_stop_training(
+    current_user: User = Depends(require_role([UserRole.ADMIN]))
+):
+    """Stop federated learning training (admin only)."""
+    if not HAS_FL or not fl_server:
+        raise HTTPException(status_code=503, detail="Federated learning not available")
+
+    fl_server.stop()
+    return {"status": "stopped"}
+
+
+# =============================================================================
 # Main
 # =============================================================================
 
