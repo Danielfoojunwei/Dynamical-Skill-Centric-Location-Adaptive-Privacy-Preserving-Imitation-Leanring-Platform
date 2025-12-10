@@ -657,6 +657,374 @@ async def get_blackbox():
 async def get_fhe_audit():
     return fhe_auditor.get_logs()
 
+
+# --- Device Management: ONVIF PTZ Control ---
+
+from src.drivers.onvif_ptz import ONVIFPTZController, MockPTZController, PTZDirection
+
+# PTZ controller instances (camera_id -> controller)
+ptz_controllers: Dict[str, ONVIFPTZController] = {}
+
+class PTZConnectRequest(BaseModel):
+    camera_id: str
+    host: str
+    port: int = 80
+    username: str = "admin"
+    password: str = "admin"
+
+class PTZMoveRequest(BaseModel):
+    direction: str  # up, down, left, right, zoom_in, zoom_out, stop
+    speed: float = 0.5
+
+class PTZAbsoluteMoveRequest(BaseModel):
+    pan: float
+    tilt: float
+    zoom: float
+    speed: float = 0.5
+
+@app.post("/api/devices/ptz/connect", dependencies=[Depends(get_api_key)])
+async def ptz_connect(request: PTZConnectRequest):
+    """Connect to an ONVIF PTZ camera."""
+    try:
+        controller = ONVIFPTZController(
+            host=request.host,
+            port=request.port,
+            username=request.username,
+            password=request.password,
+        )
+        if controller.connect():
+            ptz_controllers[request.camera_id] = controller
+            return {
+                "success": True,
+                "camera_id": request.camera_id,
+                "presets": [p.name for p in controller.get_presets()],
+            }
+        else:
+            return {"success": False, "error": "Failed to connect"}
+    except Exception as e:
+        logger.error(f"PTZ connect error: {e}")
+        return {"success": False, "error": str(e)}
+
+@app.post("/api/devices/ptz/{camera_id}/disconnect", dependencies=[Depends(get_api_key)])
+async def ptz_disconnect(camera_id: str):
+    """Disconnect from a PTZ camera."""
+    if camera_id in ptz_controllers:
+        ptz_controllers[camera_id].disconnect()
+        del ptz_controllers[camera_id]
+        return {"success": True}
+    return {"success": False, "error": "Camera not connected"}
+
+@app.get("/api/devices/ptz/{camera_id}/status", dependencies=[Depends(get_api_key)])
+async def ptz_status(camera_id: str):
+    """Get PTZ camera status."""
+    if camera_id not in ptz_controllers:
+        return {"error": "Camera not connected"}
+
+    status = ptz_controllers[camera_id].get_status()
+    return {
+        "pan": status.pan,
+        "tilt": status.tilt,
+        "zoom": status.zoom,
+        "moving": status.moving,
+        "error": status.error,
+    }
+
+@app.post("/api/devices/ptz/{camera_id}/move", dependencies=[Depends(get_api_key)])
+async def ptz_move(camera_id: str, request: PTZMoveRequest):
+    """Move PTZ camera in a direction."""
+    if camera_id not in ptz_controllers:
+        return {"success": False, "error": "Camera not connected"}
+
+    direction_map = {
+        "up": PTZDirection.UP,
+        "down": PTZDirection.DOWN,
+        "left": PTZDirection.LEFT,
+        "right": PTZDirection.RIGHT,
+        "zoom_in": PTZDirection.ZOOM_IN,
+        "zoom_out": PTZDirection.ZOOM_OUT,
+        "stop": PTZDirection.STOP,
+    }
+
+    direction = direction_map.get(request.direction.lower())
+    if not direction:
+        return {"success": False, "error": f"Invalid direction: {request.direction}"}
+
+    success = ptz_controllers[camera_id].move(direction, speed=request.speed)
+    return {"success": success}
+
+@app.post("/api/devices/ptz/{camera_id}/move_absolute", dependencies=[Depends(get_api_key)])
+async def ptz_move_absolute(camera_id: str, request: PTZAbsoluteMoveRequest):
+    """Move PTZ camera to absolute position."""
+    if camera_id not in ptz_controllers:
+        return {"success": False, "error": "Camera not connected"}
+
+    success = ptz_controllers[camera_id].move_absolute(
+        pan=request.pan,
+        tilt=request.tilt,
+        zoom=request.zoom,
+        speed=request.speed,
+    )
+    return {"success": success}
+
+@app.post("/api/devices/ptz/{camera_id}/stop", dependencies=[Depends(get_api_key)])
+async def ptz_stop(camera_id: str):
+    """Stop PTZ camera movement."""
+    if camera_id not in ptz_controllers:
+        return {"success": False, "error": "Camera not connected"}
+
+    success = ptz_controllers[camera_id].stop()
+    return {"success": success}
+
+@app.get("/api/devices/ptz/{camera_id}/presets", dependencies=[Depends(get_api_key)])
+async def ptz_get_presets(camera_id: str):
+    """Get PTZ camera presets."""
+    if camera_id not in ptz_controllers:
+        return {"error": "Camera not connected"}
+
+    presets = ptz_controllers[camera_id].get_presets()
+    return {
+        "presets": [
+            {"name": p.name, "token": p.token, "position": p.position}
+            for p in presets
+        ]
+    }
+
+@app.post("/api/devices/ptz/{camera_id}/goto_preset/{preset_name}", dependencies=[Depends(get_api_key)])
+async def ptz_goto_preset(camera_id: str, preset_name: str, speed: float = 0.5):
+    """Go to a PTZ preset position."""
+    if camera_id not in ptz_controllers:
+        return {"success": False, "error": "Camera not connected"}
+
+    success = ptz_controllers[camera_id].goto_preset(preset_name, speed=speed)
+    return {"success": success}
+
+@app.post("/api/devices/ptz/{camera_id}/set_preset/{preset_name}", dependencies=[Depends(get_api_key)])
+async def ptz_set_preset(camera_id: str, preset_name: str):
+    """Save current position as a preset."""
+    if camera_id not in ptz_controllers:
+        return {"success": False, "error": "Camera not connected"}
+
+    token = ptz_controllers[camera_id].set_preset(preset_name)
+    return {"success": token is not None, "token": token}
+
+@app.post("/api/devices/ptz/{camera_id}/calibrate", dependencies=[Depends(get_api_key)])
+async def ptz_calibrate(camera_id: str):
+    """Run PTZ auto-calibration."""
+    if camera_id not in ptz_controllers:
+        return {"success": False, "error": "Camera not connected"}
+
+    result = ptz_controllers[camera_id].auto_calibrate()
+    return result
+
+
+# --- Device Management: Glove Calibration ---
+
+from src.drivers.glove_calibration import GloveCalibrator, CalibrationStep
+
+# Glove calibrator instances (glove_id -> calibrator)
+glove_calibrators: Dict[str, GloveCalibrator] = {}
+
+class GloveCalibrationStartRequest(BaseModel):
+    glove_id: str
+    side: str = "right"  # 'left' or 'right'
+
+@app.post("/api/devices/glove/calibration/start", dependencies=[Depends(get_api_key)])
+async def glove_calibration_start(request: GloveCalibrationStartRequest):
+    """Start glove calibration process."""
+    try:
+        calibrator = GloveCalibrator(
+            glove_id=request.glove_id,
+            side=request.side,
+        )
+        calibrator.start_calibration()
+        glove_calibrators[request.glove_id] = calibrator
+
+        return {
+            "success": True,
+            "glove_id": request.glove_id,
+            "current_step": calibrator.current_step.value,
+            "instruction": calibrator.get_next_instruction(),
+        }
+    except Exception as e:
+        logger.error(f"Glove calibration start error: {e}")
+        return {"success": False, "error": str(e)}
+
+@app.get("/api/devices/glove/{glove_id}/calibration/status", dependencies=[Depends(get_api_key)])
+async def glove_calibration_status(glove_id: str):
+    """Get glove calibration status."""
+    if glove_id not in glove_calibrators:
+        return {"error": "Calibration not started for this glove"}
+
+    calibrator = glove_calibrators[glove_id]
+    return {
+        **calibrator.get_status(),
+        "instruction": calibrator.get_next_instruction(),
+    }
+
+@app.post("/api/devices/glove/{glove_id}/calibration/capture", dependencies=[Depends(get_api_key)])
+async def glove_calibration_capture(glove_id: str):
+    """Capture current pose for calibration."""
+    if glove_id not in glove_calibrators:
+        return {"error": "Calibration not started for this glove"}
+
+    calibrator = glove_calibrators[glove_id]
+    result = calibrator.capture_pose()
+
+    if result.get("success") and calibrator.current_step == CalibrationStep.COMPLETE:
+        # Save calibration
+        path = calibrator.save_calibration()
+        result["calibration_saved"] = str(path) if path else None
+
+    result["instruction"] = calibrator.get_next_instruction()
+    return result
+
+@app.post("/api/devices/glove/{glove_id}/calibration/finalize", dependencies=[Depends(get_api_key)])
+async def glove_calibration_finalize(glove_id: str):
+    """Finalize and save calibration."""
+    if glove_id not in glove_calibrators:
+        return {"error": "Calibration not started for this glove"}
+
+    calibrator = glove_calibrators[glove_id]
+    calibration = calibrator.finalize()
+
+    if calibration:
+        path = calibrator.save_calibration()
+        return {
+            "success": True,
+            "glove_id": calibration.glove_id,
+            "side": calibration.side,
+            "quality": calibration.overall_quality,
+            "joints_calibrated": len(calibration.joints),
+            "saved_to": str(path) if path else None,
+        }
+
+    return {"success": False, "error": "Calibration not complete"}
+
+@app.post("/api/devices/glove/{glove_id}/haptic/test", dependencies=[Depends(get_api_key)])
+async def glove_haptic_test(glove_id: str):
+    """Test haptic feedback motors."""
+    if glove_id not in glove_calibrators:
+        # Create temporary calibrator for testing
+        calibrator = GloveCalibrator(glove_id=glove_id)
+        glove_calibrators[glove_id] = calibrator
+
+    result = glove_calibrators[glove_id].test_haptics()
+    return result
+
+@app.get("/api/devices/glove/{glove_id}/calibration/load", dependencies=[Depends(get_api_key)])
+async def glove_calibration_load(glove_id: str):
+    """Load existing calibration from file."""
+    try:
+        calibrator = GloveCalibrator(glove_id=glove_id)
+        calibration = calibrator.load_calibration()
+
+        if calibration:
+            glove_calibrators[glove_id] = calibrator
+            return {
+                "success": True,
+                "glove_id": calibration.glove_id,
+                "side": calibration.side,
+                "calibrated_at": calibration.calibrated_at,
+                "quality": calibration.overall_quality,
+            }
+
+        return {"success": False, "error": "Calibration file not found"}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+# --- Robot Skill Invoker API ---
+
+from src.core.robot_skill_invoker import (
+    RobotSkillInvoker, SkillInvocationRequest, ObservationState,
+    InvocationMode, ActionSpace, init_skill_invoker
+)
+
+# Initialize skill invoker
+robot_skill_invoker = init_skill_invoker(
+    device_id=os.getenv("DEVICE_ID", "orin_default"),
+    robot_dof=23,
+    hand_dof=21,
+)
+robot_skill_invoker.start()
+
+class SkillInvokeRequest(BaseModel):
+    task_description: Optional[str] = None
+    skill_ids: Optional[List[str]] = None
+    joint_positions: Optional[List[float]] = None
+    ee_position: Optional[List[float]] = None
+    mode: str = "autonomous"
+    action_space: str = "joint_position"
+    max_skills: int = 3
+
+@app.post("/api/v1/robot/invoke_skill", dependencies=[Depends(get_api_key)])
+async def invoke_skill(request: SkillInvokeRequest):
+    """Invoke skills on the robot."""
+    try:
+        # Build observation state
+        observation = None
+        if request.joint_positions:
+            observation = ObservationState(
+                joint_positions=np.array(request.joint_positions),
+                joint_velocities=np.zeros(len(request.joint_positions)),
+            )
+            if request.ee_position:
+                observation.ee_position = np.array(request.ee_position)
+
+        # Build invocation request
+        mode_map = {
+            "direct": InvocationMode.DIRECT,
+            "blended": InvocationMode.BLENDED,
+            "sequential": InvocationMode.SEQUENTIAL,
+            "autonomous": InvocationMode.AUTONOMOUS,
+        }
+
+        action_space_map = {
+            "joint_position": ActionSpace.JOINT_POSITION,
+            "joint_velocity": ActionSpace.JOINT_VELOCITY,
+            "cartesian_pose": ActionSpace.CARTESIAN_POSE,
+            "hybrid": ActionSpace.HYBRID,
+        }
+
+        invocation_request = SkillInvocationRequest(
+            task_description=request.task_description,
+            skill_ids=request.skill_ids,
+            observation=observation,
+            mode=mode_map.get(request.mode, InvocationMode.AUTONOMOUS),
+            action_space=action_space_map.get(request.action_space, ActionSpace.JOINT_POSITION),
+            max_skills=request.max_skills,
+        )
+
+        result = robot_skill_invoker.invoke(invocation_request)
+
+        return {
+            "success": result.success,
+            "request_id": result.request_id,
+            "actions": [
+                {
+                    "skill_id": a.skill_id,
+                    "joint_positions": a.joint_positions.tolist() if a.joint_positions is not None else None,
+                    "gripper_action": a.gripper_action,
+                    "confidence": a.confidence,
+                }
+                for a in result.actions
+            ],
+            "skill_ids_used": result.skill_ids_used,
+            "blend_weights": result.blend_weights,
+            "safety_status": result.safety_status,
+            "total_time_ms": result.total_time_ms,
+            "error": result.error_message,
+        }
+    except Exception as e:
+        logger.error(f"Skill invocation error: {e}")
+        return {"success": False, "error": str(e)}
+
+@app.get("/api/v1/robot/invoker/stats", dependencies=[Depends(get_api_key)])
+async def get_invoker_stats():
+    """Get skill invoker statistics."""
+    return robot_skill_invoker.get_statistics()
+
+
 # --- Static Files (Production) ---
 # Mount static assets if they exist (for production build)
 # MOVED TO END TO AVOID SHADOWING API ROUTES
