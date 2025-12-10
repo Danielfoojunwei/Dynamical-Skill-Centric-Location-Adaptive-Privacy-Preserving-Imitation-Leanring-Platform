@@ -299,10 +299,10 @@ async def get_history(limit: int = 50, db: Session = Depends(get_db)):
 async def list_devices(db: Session = Depends(get_db)):
     # 1. Get Discovered Network Devices
     net_devices = network_manager.get_devices()
-    
+
     # 2. Convert to DeviceInfo
     device_list = []
-    
+
     # Add network devices
     for d in net_devices:
         status = "ONLINE" if (time.time() - d.last_seen < 10) else "OFFLINE"
@@ -312,7 +312,7 @@ async def list_devices(db: Session = Depends(get_db)):
             status=status,
             last_seen=d.last_seen
         ))
-        
+
     # 3. Add Hardcoded/DB devices (Legacy/Wired)
     db_devices = db.query(Device).all()
     for d in db_devices:
@@ -337,15 +337,6 @@ async def list_devices(db: Session = Depends(get_db)):
                 status="ONLINE" if vendor_adapter.connected else "CONNECTING",
                 last_seen=time.time()
             ))
-            
-    # If empty, seed mock for demo
-    if not device_list and not db_devices:
-         mock_devices = [
-            Device(id="cam_01", type="CAMERA", status="ONLINE", last_seen=time.time()),
-            Device(id="glove_right", type="DOGLOVE", status="ONLINE", last_seen=time.time()),
-        ]
-         for d in mock_devices:
-             device_list.append(DeviceInfo(id=d.id, type=d.type, status=d.status, last_seen=d.last_seen))
 
     return device_list
 
@@ -462,218 +453,6 @@ if os.path.exists(ota_dir):
     app.mount("/ota", StaticFiles(directory=ota_dir), name="ota")
 
 
-
-@app.post("/cloud/upload")
-async def upload_gradients(request: CloudUploadRequest):
-    """Encrypt and upload gradients for Federated Learning."""
-    gradients = vendor_adapter.get_gradient_buffer()
-    if gradients is None:
-        return {"status": "no_gradients"}
-    
-
-
-
-
-@app.get("/system/history", dependencies=[Depends(get_api_key)])
-async def get_history(limit: int = 50, db: Session = Depends(get_db)):
-    snapshots = db.query(MetricSnapshot).order_by(MetricSnapshot.timestamp.desc()).limit(limit).all()
-    # Return reversed to show chronological order
-    return [
-        {
-            "timestamp": s.timestamp,
-            "tflops_used": s.tflops_used,
-            "memory_used_gb": s.memory_used_gb
-        }
-        for s in reversed(snapshots)
-    ]
-
-@app.get("/devices", response_model=List[DeviceInfo], dependencies=[Depends(get_api_key)])
-async def list_devices(db: Session = Depends(get_db)):
-    # 1. Get Discovered Network Devices
-    net_devices = network_manager.get_devices()
-    
-    # 2. Convert to DeviceInfo
-    device_list = []
-    
-    # Add network devices
-    for d in net_devices:
-        status = "ONLINE" if (time.time() - d.last_seen < 10) else "OFFLINE"
-        device_list.append(DeviceInfo(
-            id=f"{d.type}_{d.ip}",
-            type=d.type,
-            status=status,
-            last_seen=d.last_seen
-        ))
-        
-    # 3. Add Hardcoded/DB devices (Legacy/Wired)
-    db_devices = db.query(Device).all()
-    for d in db_devices:
-        # Avoid duplicates if discovered
-        if not any(dev.id == d.id for dev in device_list):
-             device_list.append(DeviceInfo(
-                id=d.id,
-                type=d.type,
-                status=d.status,
-                last_seen=d.last_seen
-            ))
-            
-    # If empty, seed mock for demo
-    if not device_list and not db_devices:
-         mock_devices = [
-            Device(id="cam_01", type="CAMERA", status="ONLINE", last_seen=time.time()),
-            Device(id="glove_right", type="DOGLOVE", status="ONLINE", last_seen=time.time()),
-        ]
-         for d in mock_devices:
-             device_list.append(DeviceInfo(id=d.id, type=d.type, status=d.status, last_seen=d.last_seen))
-
-    return device_list
-
-@app.post("/devices/scan", dependencies=[Depends(get_api_key)])
-async def scan_devices():
-    # Trigger active scan (broadcast)
-    # Network manager runs loop, but we can force a broadcast if we implemented it
-    # For now, just return success, the loop handles it
-    return {"message": "Scan initiated"}
-
-
-# --- Settings API ---
-SETTINGS_FILE = "settings.json"
-
-class SystemSettings(BaseModel):
-    camera_rtsp_url: str = "rtsp://192.168.1.100:554/stream"
-
-def load_settings_file():
-    if os.path.exists(SETTINGS_FILE):
-        try:
-            with open(SETTINGS_FILE, 'r') as f:
-                return json.load(f)
-        except:
-            pass
-    return {"camera_rtsp_url": "rtsp://192.168.1.100:554/stream"}
-
-def save_settings_file(settings: dict):
-    with open(SETTINGS_FILE, 'w') as f:
-        json.dump(settings, f, indent=2)
-
-@app.get("/api/settings", dependencies=[Depends(get_api_key)])
-async def get_settings():
-    return load_settings_file()
-
-@app.post("/api/settings", dependencies=[Depends(get_api_key)])
-async def update_settings(settings: SystemSettings):
-    save_settings_file(settings.dict())
-    return {"message": "Settings updated"}
-
-# --- OTA API ---
-@app.get("/api/ota/check/{device_type}", dependencies=[Depends(get_api_key)])
-async def check_update(device_type: str):
-    pkg = ota_manager.get_latest_version(device_type)
-    if not pkg:
-        return {"update_available": False}
-    return {
-        "update_available": True,
-        "version": pkg.version,
-        "checksum": pkg.checksum,
-        "url": f"/ota/{os.path.basename(pkg.file_path)}"
-    }
-
-# --- Safety API ---
-
-class ZoneCreate(BaseModel):
-    name: str
-    zone_type: str
-    coordinates: List[List[float]]
-
-@app.get("/api/safety/zones", dependencies=[Depends(get_api_key)])
-async def get_zones(db: Session = Depends(get_db)):
-    return db.query(SafetyZone).all()
-
-@app.post("/api/safety/zones", dependencies=[Depends(get_api_key)])
-async def create_zone(zone: ZoneCreate, db: Session = Depends(get_db)):
-    db_zone = SafetyZone(
-        name=zone.name,
-        zone_type=zone.zone_type,
-        coordinates_json=json.dumps(zone.coordinates)
-    )
-    db.add(db_zone)
-    db.commit()
-    safety_manager.refresh_cache()
-    return {"message": "Zone created"}
-
-@app.delete("/api/safety/zones/{zone_id}", dependencies=[Depends(get_api_key)])
-async def delete_zone(zone_id: int, db: Session = Depends(get_db)):
-    db.query(SafetyZone).filter(SafetyZone.id == zone_id).delete()
-    db.commit()
-    safety_manager.refresh_cache()
-    return {"message": "Zone deleted"}
-
-@app.get("/api/safety/config", dependencies=[Depends(get_api_key)])
-async def get_safety_config(db: Session = Depends(get_db)):
-    return db.query(SafetyConfig).first()
-
-@app.post("/api/safety/config", dependencies=[Depends(get_api_key)])
-async def update_safety_config(config: dict, db: Session = Depends(get_db)):
-    # Simple dict update for now
-    db_cfg = db.query(SafetyConfig).first()
-    if not db_cfg:
-        db_cfg = SafetyConfig(id=1)
-        db.add(db_cfg)
-    
-    if "human_sensitivity" in config:
-        db_cfg.human_sensitivity = config["human_sensitivity"]
-    if "stop_distance_m" in config:
-        db_cfg.stop_distance_m = config["stop_distance_m"]
-        
-    db.commit()
-    safety_manager.refresh_cache()
-    return {"message": "Config updated"}
-
-@app.get("/api/safety/hazards", dependencies=[Depends(get_api_key)])
-async def get_active_hazards():
-    # Filter out old hazards just in case
-    cutoff = time.time() - 5.0
-    safety_manager.active_hazards = [h for h in safety_manager.active_hazards if h["timestamp"] > cutoff]
-    return safety_manager.active_hazards
-
-# --- Hazard Registry API ---
-
-class HazardTypeCreate(BaseModel):
-    type_key: str
-    display_name: str
-    description: str
-    default_severity: float
-    default_behaviour: Dict[str, Any]
-
-@app.get("/api/safety/hazards/types", dependencies=[Depends(get_api_key)])
-async def get_hazard_types():
-    from src.core.environment_hazards import hazard_registry
-    return [h.to_dict() for h in hazard_registry.all()]
-
-@app.post("/api/safety/hazards/types", dependencies=[Depends(get_api_key)])
-async def create_hazard_type(hazard: HazardTypeCreate):
-    from src.core.environment_hazards import hazard_registry, HazardTypeDefinition, HazardCategory
-    
-    # Check if exists
-    if hazard_registry.get(hazard.type_key):
-        raise HTTPException(status_code=400, detail="Hazard type already exists")
-        
-    definition = HazardTypeDefinition(
-        type_key=hazard.type_key,
-        category=HazardCategory.CUSTOM,
-        display_name=hazard.display_name,
-        description=hazard.description,
-        default_severity=hazard.default_severity,
-        default_behaviour=hazard.default_behaviour
-    )
-    
-    hazard_registry.register_custom(definition)
-    return {"message": "Hazard type registered", "type": hazard.type_key}
-
-
-# Serve OTA files (no auth required for device download, or use token in URL)
-ota_dir = os.path.join(os.getcwd(), "ota_packages")
-if os.path.exists(ota_dir):
-    app.mount("/ota", StaticFiles(directory=ota_dir), name="ota")
 
 # --- Cloud Integration Endpoints ---
 
@@ -715,8 +494,9 @@ async def upload_gradients(request: CloudUploadRequest):
 @app.get("/cloud/status")
 async def cloud_status():
     return {
-        "ffm_provider": "MockProvider",
-        "connection": "connected",
+        "ffm_provider": "PhysicalIntelligence",
+        "connection": "connected" if ffm_client else "disconnected",
+        "aggregator_backend": secure_aggregator.backend if secure_aggregator else "none",
         "last_sync": time.time()
     }
 
@@ -724,10 +504,14 @@ async def cloud_status():
 
 @app.get("/api/observability/vla/status")
 async def get_vla_status():
-    # Return mocked real-time VLA state
+    """Get real-time VLA model status and attention data."""
+    # Return real VLA state from trace manager
+    attention_data = trace_manager.get_latest_attention_map() if hasattr(trace_manager, 'get_latest_attention_map') else None
     return {
         "confidence": trace_manager.latest_vla_confidence or 0.85,
-        "attention_map": "mock_heatmap_data" # In real app, this would be a URL or base64
+        "attention_map": attention_data,  # None if no attention data available
+        "model_loaded": vendor_adapter.model_loaded if vendor_adapter else False,
+        "inference_latency_ms": trace_manager.latest_inference_latency if hasattr(trace_manager, 'latest_inference_latency') else None
     }
 
 @app.post("/api/observability/incident/trigger", dependencies=[Depends(get_api_key)])
