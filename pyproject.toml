@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dynamical_edge"
+version = "0.1.0"
+description = "Dynamical Robotics Edge Platform (AGX Orin 32GB)"
+authors = [
+    {name = "Dynamical Robotics", email = "dev@dynamical.ai"},
+]
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "pydantic",
+    "numpy",
+    "opencv-python",
+    "pyserial",
+    "aiohttp",
+    "websockets",
+    "jinja2",
+    "scipy",
+    "httpx",
+]
+requires-python = ">=3.8"
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+addopts = "-ra -q"
+testpaths = [
+    "tests",
+]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+line-length = 120
+target-version = "py38"
+select = ["E", "F", "W", "I"]
+ignore = []
+
+[tool.ruff.per-file-ignores]
+"__init__.py" = ["F401"]
+
+[tool.isort]
+profile = "black"
+line_length = 120

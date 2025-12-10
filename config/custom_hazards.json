@@ -1,0 +1,53 @@
+[
+    {
+        "type_key": "FALLING_BOX",
+        "category": "custom",
+        "display_name": "Falling Box",
+        "description": "Box detected falling from shelf",
+        "default_severity": 0.9,
+        "default_behaviour": {
+            "action": "STOP",
+            "clearance_m": 3.0
+        }
+    },
+    {
+        "type_key": "DIRECT_TEST",
+        "category": "custom",
+        "display_name": "Direct Test",
+        "description": "Testing via direct call",
+        "default_severity": 0.1,
+        "default_behaviour": {
+            "action": "WARN"
+        }
+    },
+    {
+        "type_key": "TEST_HAZARD",
+        "category": "custom",
+        "display_name": "Test Hazard",
+        "description": "A test hazard",
+        "default_severity": 0.5,
+        "default_behaviour": {
+            "action": "WARN"
+        }
+    },
+    {
+        "type_key": "TEST_HAZARD_7350",
+        "category": "custom",
+        "display_name": "Test Hazard",
+        "description": "A test hazard",
+        "default_severity": 0.5,
+        "default_behaviour": {
+            "action": "WARN"
+        }
+    },
+    {
+        "type_key": "TEST_HAZARD_6316",
+        "category": "custom",
+        "display_name": "Test Hazard",
+        "description": "A test hazard",
+        "default_severity": 0.5,
+        "default_behaviour": {
+            "action": "WARN"
+        }
+    }
+]

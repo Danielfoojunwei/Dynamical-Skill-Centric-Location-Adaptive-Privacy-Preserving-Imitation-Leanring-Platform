@@ -1,0 +1,53 @@
+# Dynamical Edge System Configuration
+
+system:
+  simulation_mode: false
+  log_level: "INFO"
+
+safety:
+  stop_dist: 1.5
+  sensitivity: 0.8
+
+cameras:
+  rtsp_url: "rtsp://192.168.1.100:554/stream"
+  
+models:
+  paligemma_path: "models/paligemma"
+
+tflops_budget:
+  total_fp16: 137.0
+  safe_utilization: 0.85
+  burst_utilization: 0.95
+  allocations:
+    safety_detection: 15.0
+    spatial_brain: 3.0
+    navigation_detection: 40.0
+    depth_estimation: 5.0
+    trajectory_prediction: 0.5
+    il_training: 9.0
+    moai_compression: 3.0
+    fhe_encryption: 1.0
+    pi0_vla: 10.0
+    full_perception: 30.0
+    anomaly_detection: 3.0
+
+pipeline:
+  queues:
+    safety_maxsize: 100
+    perception_maxsize: 500
+    learning_maxsize: 1000
+  routing:
+    safety_cameras: [0, 1, 2, 3]
+    perception_cameras: [4, 5, 6, 7]
+  learning:
+    batch_size: 1000
+    batch_timeout: 60.0
+
+retargeting:
+  workspace_min: [-1.0, -1.0, 0.0]
+  workspace_max: [1.0, 1.0, 1.5]
+  max_joint_velocity: 1.0
+  ik:
+    max_position_error: 0.05
+    max_rotation_error: 0.2
+    fallback_to_previous: true

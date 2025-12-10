@@ -1,0 +1,99 @@
+# =============================================================================
+# Dynamical Edge Platform v0.3.2 Dependencies
+# =============================================================================
+
+# Core ML
+torch>=2.0.0
+torchvision>=0.15.0
+numpy>=1.24.0
+
+# Hugging Face / Pi0 / VLA Models
+transformers>=4.38.0
+accelerate>=0.27.0
+protobuf
+safetensors
+sentencepiece
+
+# =============================================================================
+# Pose Estimation (RTMPose)
+# =============================================================================
+onnxruntime>=1.16.0        # CPU inference
+onnxruntime-gpu>=1.16.0    # GPU inference (optional, install separately)
+# For model download from HuggingFace
+huggingface-hub>=0.20.0
+
+# =============================================================================
+# Robot Kinematics & IK (Real Implementation)
+# =============================================================================
+# Pinocchio - Fast C++ kinematics library (recommended)
+# Install with: conda install -c conda-forge pinocchio
+# Or: pip install pin (some platforms)
+
+# urchin - Pure Python URDF parser (fallback)
+urchin>=0.1.0
+
+# yourdfpy - Alternative URDF loader
+yourdfpy>=0.0.56
+
+# =============================================================================
+# Depth Estimation (Depth Anything V3)
+# =============================================================================
+# TensorRT models require: tensorrt (install via NVIDIA SDK)
+# ONNX models work with onnxruntime above
+
+# =============================================================================
+# Computer Vision
+# =============================================================================
+opencv-python>=4.8.0
+scipy>=1.10.0
+
+# =============================================================================
+# Hardware Communication
+# =============================================================================
+pyserial>=3.5
+
+# =============================================================================
+# Web/API Framework
+# =============================================================================
+fastapi>=0.100.0
+uvicorn>=0.23.0
+aiohttp>=3.8.0
+requests>=2.31.0
+httpx>=0.24.0
+python-multipart>=0.0.6
+websockets>=11.0
+jinja2>=3.1.0
+
+# =============================================================================
+# Configuration & Utilities
+# =============================================================================
+psutil>=5.9.0
+tqdm>=4.65.0
+omegaconf>=2.3.0
+hydra-core>=1.3.0
+sqlalchemy>=2.0.0
+python-dotenv>=1.0.0
+
+# =============================================================================
+# Testing
+# =============================================================================
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+
+# =============================================================================
+# Optional: MMPose (for RTMPose model training)
+# =============================================================================
+# openmim  # Uncomment to install MMPose ecosystem
+# mmpose   # pip install -U openmim && mim install mmpose
+
+# =============================================================================
+# Optional: TensorRT (for Jetson deployment)
+# =============================================================================
+# tensorrt  # Install via NVIDIA JetPack or TensorRT package
+# pycuda    # Required for TensorRT Python bindings
+
+# =============================================================================
+# Optional: Federated Learning / MOAI
+# =============================================================================
+# tenseal>=0.3.0  # For FHE encryption
+# cryptography>=41.0.0

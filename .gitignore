@@ -1,0 +1,30 @@
+
+# Local files - do not commit
+.env
+system.log
+*.log
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Model weights (downloaded)
+models/*.onnx
+models/*.engine
+models/*.pt
+
+# Temp files
+*.tmp
+.cache/
