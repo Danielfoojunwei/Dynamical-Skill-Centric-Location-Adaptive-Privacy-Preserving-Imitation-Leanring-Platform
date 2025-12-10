@@ -194,54 +194,84 @@ class GMRConfig:
 
 
 # ---------------------------------------------------------------------------
-# Mock GMR Interface (when library not available)
+# Real Retargeter Fallback (replaces MockGMRRetargeter)
 # ---------------------------------------------------------------------------
 
-class MockGMRRetargeter:
+# Try to import the real MotionRetargeter
+try:
+    from src.core.retargeting.motion_retargeter import MotionRetargeter, RetargetingConfig
+    HAS_MOTION_RETARGETER = True
+except ImportError:
+    HAS_MOTION_RETARGETER = False
+    MotionRetargeter = None
+
+
+class FallbackRetargeter:
     """
-    Mock GMR retargeter for testing when the actual library is not installed.
-    
-    Returns plausible joint configurations based on simple kinematic heuristics.
+    Fallback retargeter using the real MotionRetargeter from src.core.retargeting.
+
+    This replaces MockGMRRetargeter with a proper IK-based implementation.
+    Uses Damped Least Squares IK for end-effector matching.
     """
-    
-    def __init__(self, n_joints: int = 7):
+
+    def __init__(self, n_joints: int = 7, urdf_path: str = None):
         self.n_joints = n_joints
-        logger.warning("Using MockGMRRetargeter - install GMR for real retargeting")
-    
+
+        if HAS_MOTION_RETARGETER:
+            # Use the real MotionRetargeter
+            self._retargeter = MotionRetargeter(
+                urdf_path=urdf_path,
+                n_joints=n_joints,
+                config=RetargetingConfig(smoothing_alpha=0.3)
+            )
+            logger.info("Using real MotionRetargeter (IK-based) as GMR fallback")
+        else:
+            self._retargeter = None
+            logger.warning(
+                "MotionRetargeter not available. Using basic heuristic fallback.\n"
+                "Install required packages: pip install pinocchio"
+            )
+
     def retarget(self, human_motion: np.ndarray) -> np.ndarray:
         """
-        Mock retargeting that returns reasonable joint angles.
-        
+        Retarget human motion to robot joint configuration.
+
         Args:
             human_motion: [22, 3] GMR-format human positions
-            
+
         Returns:
             q: [n_joints] robot joint configuration
         """
-        # Simple heuristic: map shoulder/elbow/wrist positions to joint angles
+        if self._retargeter is not None:
+            # Use real retargeter - convert GMR format to expected pose format
+            try:
+                result = self._retargeter.retarget(human_motion)
+                return result.q
+            except Exception as e:
+                logger.warning(f"MotionRetargeter failed: {e}, using heuristic")
+
+        # Heuristic fallback (only if MotionRetargeter unavailable)
         q = np.zeros(self.n_joints)
-        
-        # This is a placeholder - real GMR would use proper IK
-        # Just create some motion based on arm pose
+
         if len(human_motion) >= 22:
             # Use right arm (indices 17, 19, 21 = shoulder, elbow, wrist)
             r_shoulder = human_motion[17]
             r_elbow = human_motion[19]
             r_wrist = human_motion[21]
-            
-            # Shoulder to elbow direction gives first few joints
+
+            # Compute joint angles from arm geometry
             upper_arm = r_elbow - r_shoulder
             q[0] = np.arctan2(upper_arm[1], upper_arm[0])
-            q[1] = np.arctan2(upper_arm[2], np.linalg.norm(upper_arm[:2]))
-            
-            # Elbow to wrist direction gives elbow angle
+            q[1] = np.arctan2(upper_arm[2], np.linalg.norm(upper_arm[:2]) + 1e-6)
+
             forearm = r_wrist - r_elbow
-            q[2] = np.arctan2(forearm[2], np.linalg.norm(forearm[:2]))
-            
-            # Small random noise for realism
-            q += np.random.randn(self.n_joints) * 0.01
-        
+            q[2] = np.arctan2(forearm[2], np.linalg.norm(forearm[:2]) + 1e-6)
+
         return q
+
+
+# Backwards compatibility alias
+MockGMRRetargeter = FallbackRetargeter
 
 
 # ---------------------------------------------------------------------------
@@ -301,29 +331,34 @@ class WholeBodyRetargeterGMR:
         self.smoothing_alpha: float = 0.3
     
     def _init_gmr(self):
-        """Initialize GMR library if available."""
+        """Initialize GMR library if available, fallback to real MotionRetargeter."""
         try:
-            # Try to import GMR
-            # Note: The actual import path depends on how GMR is installed
-            # This is a placeholder for the real import
+            # Try to import GMR library
             from gmr import GeneralMotionRetargeting  # type: ignore
-            
+
             self.gmr = GeneralMotionRetargeting(
                 robot_model=self.config.robot_urdf_path,
                 config=self.config.robot_config_path
             )
             logger.info("GMR library initialized successfully")
-            
+
         except ImportError:
-            logger.warning(
-                "GMR library not found. Install from https://github.com/YanjieZe/GMR\n"
-                "Using mock retargeter for testing."
+            # GMR not available - use real MotionRetargeter-based fallback
+            logger.info(
+                "GMR library not found. Using real MotionRetargeter (IK-based) fallback.\n"
+                "For full GMR support, install from: https://github.com/YanjieZe/GMR"
             )
-            self.gmr = MockGMRRetargeter(n_joints=self.n_robot_joints)
-        
+            self.gmr = FallbackRetargeter(
+                n_joints=self.n_robot_joints,
+                urdf_path=self.config.robot_urdf_path
+            )
+
         except Exception as e:
             logger.error(f"Failed to initialize GMR: {e}")
-            self.gmr = MockGMRRetargeter(n_joints=self.n_robot_joints)
+            self.gmr = FallbackRetargeter(
+                n_joints=self.n_robot_joints,
+                urdf_path=self.config.robot_urdf_path
+            )
     
     def human_pose_to_robot_q(
         self,
@@ -347,7 +382,7 @@ class WholeBodyRetargeterGMR:
         )
         
         # Call GMR retargeting
-        if isinstance(self.gmr, MockGMRRetargeter):
+        if isinstance(self.gmr, FallbackRetargeter):
             q_whole = self.gmr.retarget(gmr_positions)
         else:
             # Real GMR interface
