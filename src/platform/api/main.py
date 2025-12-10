@@ -1,7 +1,11 @@
 import sys
 import os
-import threading
 import time
+import json
+import base64
+import yaml
+import numpy as np
+import uvicorn
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Security, status
 from fastapi.security import APIKeyHeader
 from fastapi.staticfiles import StaticFiles
@@ -9,9 +13,6 @@ from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Dict, List, Optional, Any
-import uvicorn
-import json
-import numpy as np
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
 from .database import get_db, init_db, Device, SystemEvent, MetricSnapshot
@@ -21,12 +22,10 @@ load_dotenv()
 
 # Setup Logging
 from src.platform.logging_utils import get_logger
-
-# Setup Logging
 logger = get_logger("edge_platform")
 
-# Auth
-from src.core.config_loader import config
+# Config and Version
+from src.core.config_loader import config as app_config
 from src.version import __version__
 
 API_KEY_NAME = "X-API-Key"
@@ -66,9 +65,13 @@ fhe_auditor = FHEAuditor()
 # Initialize Cloud Components
 # Using DaimonVendorAdapter for Daimon Robotics VTLA
 # Note: Falls back to simulation internally if SDK is missing
-vendor_adapter = DaimonVendorAdapter() 
+vendor_adapter = DaimonVendorAdapter()
 secure_aggregator = SecureAggregator()
 ffm_client = FFMClient(api_key=os.getenv("CLOUD_API_KEY", "simulated_key"))
+
+# Initialize MoE Skill Service (singleton)
+from src.platform.cloud.moe_skill_router import CloudSkillService, SkillRequest, SkillType
+skill_service = CloudSkillService()
 
 app = FastAPI(title="Dynamical Edge Control Plane", version=__version__)
 
@@ -112,9 +115,9 @@ async def system_status():
     return {
         "version": __version__,
         "pipeline_running": state.is_running,
-        "simulation_mode": config.system.simulation_mode,
+        "simulation_mode": app_config.system.simulation_mode,
         "uptime": time.time() - state.start_time if state.is_running else 0,
-        "tflops_budget": config.tflops_budget.total_fp16
+        "tflops_budget": app_config.tflops_budget.total_fp16
     }
 
 # --- Models ---
@@ -168,41 +171,28 @@ def get_pipeline():
     return state.pipeline
 
 # --- Config Loading ---
-import yaml
 CONFIG_PATH = "config/config.yaml"
 
-def load_config():
+def load_yaml_config():
+    """Load raw YAML config for settings that aren't in app_config."""
     if os.path.exists(CONFIG_PATH):
         with open(CONFIG_PATH, 'r') as f:
             return yaml.safe_load(f)
     return {"system": {"simulation_mode": False}}
 
-config = load_config()
-SIMULATION_MODE = config.get("system", {}).get("simulation_mode", False)
+yaml_config = load_yaml_config()
+SIMULATION_MODE = yaml_config.get("system", {}).get("simulation_mode", False)
 
 # --- Endpoints ---
-
-@app.get("/health")
-async def health_check():
-    return {"status": "ok"}
 
 @app.post("/system/start", dependencies=[Depends(get_api_key)])
 async def start_system(background_tasks: BackgroundTasks):
     if state.is_running:
         logger.warning("Attempted to start system while already running")
         return {"message": "System already running"}
-    
+
     pipeline = get_pipeline()
-    
-    # Start in background thread to not block API
-    def run_pipeline():
-        logger.info("Starting pipeline...")
-        pipeline.start()
-        
-    # We can't easily "join" the pipeline.start() since it might be blocking or loop
-    # integrated_pipeline.start() currently starts threads and returns.
-    # So we can just call it.
-    
+
     try:
         pipeline.start()
         state.is_running = True
@@ -475,17 +465,14 @@ async def sync_model(request: CloudSyncRequest):
 # Skills are MoE experts that WE train and own (not vendor models)
 
 @app.get("/api/v1/skills")
-async def list_skills(skill_type: str = None, tags: str = None):
+async def list_skills(skill_type_filter: str = None, tags: str = None):
     """List available skills from the library."""
     try:
-        from src.platform.cloud.moe_skill_router import CloudSkillService
-        skill_service = CloudSkillService()
         skills = skill_service.storage.list_skills()
 
         # Filter by type if specified
-        if skill_type:
-            from src.platform.cloud.moe_skill_router import SkillType
-            skills = [s for s in skills if s.skill_type.value == skill_type]
+        if skill_type_filter:
+            skills = [s for s in skills if s.skill_type.value == skill_type_filter]
 
         # Filter by tags if specified
         if tags:
@@ -522,10 +509,6 @@ async def request_skills_for_task(request: dict):
     3. Returns encrypted skills with routing weights
     """
     try:
-        from src.platform.cloud.moe_skill_router import CloudSkillService, SkillRequest
-
-        skill_service = CloudSkillService()
-
         skill_request = SkillRequest(
             task_description=request.get("task_description", ""),
             max_skills=request.get("max_skills", 3),
@@ -550,24 +533,17 @@ async def upload_skill(request: dict):
     Skills are MoE experts trained on edge devices.
     They are encrypted and stored in our cloud skill library.
     """
-    import numpy as np
-    import base64
-
     try:
-        from src.platform.cloud.moe_skill_router import CloudSkillService, SkillType
-
-        skill_service = CloudSkillService()
-
         # Decode weights from base64
         weights_b64 = request.get("weights", "")
         weights = np.frombuffer(base64.b64decode(weights_b64), dtype=np.float32)
 
-        skill_type = SkillType(request.get("skill_type", "manipulation"))
+        skill_type_val = SkillType(request.get("skill_type", "manipulation"))
 
         metadata = skill_service.register_skill(
             name=request.get("name", ""),
             description=request.get("description", ""),
-            skill_type=skill_type,
+            skill_type=skill_type_val,
             weights=weights,
             config=request.get("config", {}),
             version=request.get("version", "1.0.0"),
@@ -589,10 +565,6 @@ async def upload_skill(request: dict):
 async def get_skill(skill_id: str):
     """Get a specific skill by ID."""
     try:
-        from src.platform.cloud.moe_skill_router import CloudSkillService
-        import base64
-
-        skill_service = CloudSkillService()
         encrypted_skill = skill_service.storage.get_skill(skill_id)
 
         if not encrypted_skill:
@@ -621,8 +593,6 @@ async def get_skill(skill_id: str):
 async def cloud_status():
     """Get cloud connection status."""
     try:
-        from src.platform.cloud.moe_skill_router import CloudSkillService
-        skill_service = CloudSkillService()
         stats = skill_service.get_service_statistics()
 
         return {

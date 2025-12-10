@@ -133,7 +133,7 @@ from src.platform.cloud.secure_aggregator import SecureAggregator
 from src.platform.safety_manager import safety_manager
 
 # Core
-from src.core.retargeting import Retargeter
+from src.core.gmr_retargeting import Retargeter
 # from src.core.quality.pose_quality import PoseQuality
 # from src.core.quality.integrated_quality import IntegratedQuality
 from src.core.neuracore_client import get_client as get_neuracore_client
