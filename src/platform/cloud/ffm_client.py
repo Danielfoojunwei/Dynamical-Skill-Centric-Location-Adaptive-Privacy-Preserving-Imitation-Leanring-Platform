@@ -1,41 +1,75 @@
 """
-FFM Client Module
+FFM Client - Unified Model and Skill Client
 
-This module re-exports the real FFM client implementation.
-The simulated client has been deprecated in favor of real functionality.
+This module provides the main entry point for model operations:
+- Base VLA model download (read-only, one-time)
+- Skill library operations (read/write, MoE skills)
 
-Features:
-- Real HTTP API calls to model providers (Physical Intelligence, HuggingFace)
-- Cryptographic SHA256 signature verification
-- Progress tracking for downloads
-- Caching and version management
-- Retry logic with exponential backoff
+Architecture Note:
+    Base VLA models (Pi0, OpenVLA) are proprietary and READ-ONLY.
+    We cannot train or upload gradients to vendor models.
 
-Migration Note:
-    The simulated FFMClient has been replaced with FFMClientReal:
+    Skills are MoE experts that WE train and own. They are:
+    - Trained on edge devices
+    - Uploaded to our cloud skill library
+    - Aggregated via federated learning across our fleet
 
-    # Old (deprecated):
-    client = FFMClient(api_key="key")
+Usage:
+    from src.platform.cloud.ffm_client import UnifiedModelClient
 
-    # New:
-    from src.platform.cloud.ffm_client import FFMClient
-    client = FFMClient(config=FFMClientConfig(api_key="key"))
+    client = UnifiedModelClient()
+
+    # One-time base model download
+    path = client.download_base_model("pi0-base")
+
+    # Skill operations
+    client.upload_skill("grasp", "Grasp objects", "manipulation", weights, config)
+    skills = client.request_skills_for_task("pick up the cup")
 """
 
-# Import real implementation
+# Re-export from new model_client module
+from src.platform.cloud.model_client import (
+    # Main client
+    UnifiedModelClient,
+
+    # Component clients
+    BaseModelClient,
+    SkillLibraryClient,
+
+    # Data classes
+    BaseModelInfo,
+    SkillInfo,
+    ModelClientConfig,
+
+    # Deprecated alias
+    FFMClient,
+)
+
+# Re-export legacy types for backwards compatibility
 from src.platform.cloud.ffm_client_real import (
     FFMClientReal,
     FFMClientConfig,
     ModelVersion,
 )
 
-# Backwards-compatible alias
-FFMClient = FFMClientReal
-
 # Re-export
 __all__ = [
+    # New unified client (recommended)
+    "UnifiedModelClient",
+    "BaseModelClient",
+    "SkillLibraryClient",
+    "BaseModelInfo",
+    "SkillInfo",
+    "ModelClientConfig",
+
+    # Legacy (deprecated)
     "FFMClient",
     "FFMClientReal",
     "FFMClientConfig",
     "ModelVersion",
 ]
+
+
+def get_default_client() -> UnifiedModelClient:
+    """Get default model client instance."""
+    return UnifiedModelClient()

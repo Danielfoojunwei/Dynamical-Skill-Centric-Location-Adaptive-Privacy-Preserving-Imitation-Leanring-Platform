@@ -458,47 +458,194 @@ if os.path.exists(ota_dir):
 
 @app.post("/cloud/sync")
 async def sync_model(request: CloudSyncRequest):
-    """Check for model updates and download if available."""
-    new_version = ffm_client.check_for_updates(request.current_version)
-    if new_version:
-        success = ffm_client.download_model(new_version, "latest_model.bin")
-        if success:
-            vendor_adapter.load_weights("latest_model.bin")
-            trace_manager.log_event("Cloud", "ModelUpdate", {"version": new_version})
-            return {"status": "updated", "version": new_version}
-    return {"status": "up_to_date"}
+    """
+    DEPRECATED: Base VLA models are frozen and don't receive updates.
 
-@app.post("/cloud/upload")
-async def upload_gradients(request: CloudUploadRequest):
-    """Encrypt and upload gradients for Federated Learning."""
-    gradients = vendor_adapter.get_gradient_buffer()
-    if gradients is None:
-        return {"status": "no_gradients"}
-    
-    # Log start
-    trace_manager.log_event("FHE", "EncryptionStart", {"size": len(gradients)})
-    
-    encrypted_blob = secure_aggregator.encrypt_gradients(gradients)
-    
-    # Audit Log
-    fhe_auditor.log_upload(
-        encryption_id=request.gradient_id,
-        data=encrypted_blob,
-        noise_budget=10.5 # Mock budget
-    )
-    
-    success = secure_aggregator.upload_update(encrypted_blob)
-    
-    return {"status": "uploaded", "bytes": len(encrypted_blob)}
+    Use /api/v1/skills/sync for skill updates instead.
+    Base models (Pi0, OpenVLA) are one-time downloads.
+    """
+    return {
+        "status": "deprecated",
+        "message": "Base VLA models are frozen. Use /api/v1/skills/sync for skill updates.",
+        "current_version": request.current_version,
+    }
+
+
+# --- Skill Library API ---
+# Skills are MoE experts that WE train and own (not vendor models)
+
+@app.get("/api/v1/skills")
+async def list_skills(skill_type: str = None, tags: str = None):
+    """List available skills from the library."""
+    try:
+        from src.platform.cloud.moe_skill_router import CloudSkillService
+        skill_service = CloudSkillService()
+        skills = skill_service.storage.list_skills()
+
+        # Filter by type if specified
+        if skill_type:
+            from src.platform.cloud.moe_skill_router import SkillType
+            skills = [s for s in skills if s.skill_type.value == skill_type]
+
+        # Filter by tags if specified
+        if tags:
+            tag_list = tags.split(",")
+            skills = [s for s in skills if any(t in s.tags for t in tag_list)]
+
+        return {
+            "skills": [
+                {
+                    "id": s.id,
+                    "name": s.name,
+                    "description": s.description,
+                    "skill_type": s.skill_type.value if hasattr(s.skill_type, 'value') else s.skill_type,
+                    "version": s.version,
+                    "status": s.status.value if hasattr(s.status, 'value') else s.status,
+                    "tags": s.tags,
+                }
+                for s in skills
+            ],
+            "count": len(skills),
+        }
+    except Exception as e:
+        return {"skills": [], "count": 0, "error": str(e)}
+
+
+@app.post("/api/v1/skills/request")
+async def request_skills_for_task(request: dict):
+    """
+    Request skills for a task using MoE routing.
+
+    This is the main endpoint for skill-based execution:
+    1. Edge sends task description
+    2. Server routes to appropriate skills via MoE
+    3. Returns encrypted skills with routing weights
+    """
+    try:
+        from src.platform.cloud.moe_skill_router import CloudSkillService, SkillRequest
+
+        skill_service = CloudSkillService()
+
+        skill_request = SkillRequest(
+            task_description=request.get("task_description", ""),
+            max_skills=request.get("max_skills", 3),
+        )
+
+        response = skill_service.request_skills(skill_request)
+
+        return {
+            "skill_ids": [s.metadata.id for s in response.skills],
+            "weights": response.routing_weights,
+            "inference_time_ms": response.inference_time_ms,
+        }
+    except Exception as e:
+        return {"skill_ids": [], "weights": [], "error": str(e)}
+
+
+@app.post("/api/v1/skills/upload")
+async def upload_skill(request: dict):
+    """
+    Upload a trained skill to the library.
+
+    Skills are MoE experts trained on edge devices.
+    They are encrypted and stored in our cloud skill library.
+    """
+    import numpy as np
+    import base64
+
+    try:
+        from src.platform.cloud.moe_skill_router import CloudSkillService, SkillType
+
+        skill_service = CloudSkillService()
+
+        # Decode weights from base64
+        weights_b64 = request.get("weights", "")
+        weights = np.frombuffer(base64.b64decode(weights_b64), dtype=np.float32)
+
+        skill_type = SkillType(request.get("skill_type", "manipulation"))
+
+        metadata = skill_service.register_skill(
+            name=request.get("name", ""),
+            description=request.get("description", ""),
+            skill_type=skill_type,
+            weights=weights,
+            config=request.get("config", {}),
+            version=request.get("version", "1.0.0"),
+            tags=request.get("tags", []),
+        )
+
+        trace_manager.log_event("SkillLibrary", "SkillUploaded", {"skill_id": metadata.id})
+
+        return {
+            "success": True,
+            "skill_id": metadata.id,
+            "name": metadata.name,
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/v1/skills/{skill_id}")
+async def get_skill(skill_id: str):
+    """Get a specific skill by ID."""
+    try:
+        from src.platform.cloud.moe_skill_router import CloudSkillService
+        import base64
+
+        skill_service = CloudSkillService()
+        encrypted_skill = skill_service.storage.get_skill(skill_id)
+
+        if not encrypted_skill:
+            raise HTTPException(status_code=404, detail="Skill not found")
+
+        return {
+            "metadata": {
+                "id": encrypted_skill.metadata.id,
+                "name": encrypted_skill.metadata.name,
+                "description": encrypted_skill.metadata.description,
+                "skill_type": encrypted_skill.metadata.skill_type.value if hasattr(encrypted_skill.metadata.skill_type, 'value') else encrypted_skill.metadata.skill_type,
+                "version": encrypted_skill.metadata.version,
+                "tags": encrypted_skill.metadata.tags,
+            },
+            "encrypted_weights": base64.b64encode(encrypted_skill.encrypted_weights).decode(),
+            "encrypted_config": base64.b64encode(encrypted_skill.encrypted_config).decode(),
+            "encryption_params": encrypted_skill.encryption_params,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/cloud/status")
 async def cloud_status():
-    return {
-        "ffm_provider": "PhysicalIntelligence",
-        "connection": "connected" if ffm_client else "disconnected",
-        "aggregator_backend": secure_aggregator.backend if secure_aggregator else "none",
-        "last_sync": time.time()
-    }
+    """Get cloud connection status."""
+    try:
+        from src.platform.cloud.moe_skill_router import CloudSkillService
+        skill_service = CloudSkillService()
+        stats = skill_service.get_service_statistics()
+
+        return {
+            "architecture": "MoE_Skills",
+            "base_model_mode": "frozen",  # VLA models are read-only
+            "skill_library": {
+                "total_skills": stats["storage"]["total_skills"],
+                "encrypted": stats["storage"]["encrypted"],
+            },
+            "moe_router": {
+                "num_experts": 16,
+                "load_balance": stats["router"]["load_balance_score"],
+            },
+            "aggregator_backend": secure_aggregator.backend if secure_aggregator else "none",
+            "last_sync": time.time(),
+        }
+    except Exception as e:
+        return {
+            "architecture": "MoE_Skills",
+            "base_model_mode": "frozen",
+            "error": str(e),
+            "last_sync": time.time(),
+        }
 
 # --- Observability & RCA API ---
 
