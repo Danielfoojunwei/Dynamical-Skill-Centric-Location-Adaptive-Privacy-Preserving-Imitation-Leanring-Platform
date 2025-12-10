@@ -46,8 +46,7 @@ sys.path.insert(0, os.getcwd())
 
 from src.pipeline.integrated_pipeline import IntegratedDataPipeline
 
-# Mock Pi0 if needed (for running on non-AGX machines during dev)
-# Real components
+# Real components (mock implementations have been removed)
 from src.platform.observability.RootCauseAnalyzer import RootCauseAnalyzer
 from src.platform.ota_manager import ota_manager, FirmwarePackage
 from src.platform.safety_manager import safety_manager, SafetyZone, SafetyConfig
@@ -56,7 +55,7 @@ from src.platform.observability.FHE_Auditor import FHEAuditor
 from src.platform.cloud.secure_aggregator import SecureAggregator
 from src.platform.cloud.ffm_client import FFMClient
 from src.platform.observability.TraceManager import TraceManager
-from src.platform.cloud.vendor_adapter import VendorAdapter, SimulatedVendorAdapter
+from src.platform.cloud.vendor_adapter import VendorAdapter, Pi0VendorAdapter
 from src.drivers.daimon_vtla import DaimonVendorAdapter
 
 # Initialize Managers
