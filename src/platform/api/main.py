@@ -73,6 +73,14 @@ ffm_client = FFMClient(api_key=os.getenv("CLOUD_API_KEY", "simulated_key"))
 
 app = FastAPI(title="Dynamical Edge Control Plane", version=__version__)
 
+# Include WebSocket router for simulation streaming
+try:
+    from .simulation_ws import router as simulation_ws_router
+    app.include_router(simulation_ws_router)
+    logger.info("Simulation WebSocket router enabled")
+except ImportError as e:
+    logger.warning(f"Simulation WebSocket router not available: {e}")
+
 # Start Network Manager
 @app.on_event("startup")
 async def startup_event():

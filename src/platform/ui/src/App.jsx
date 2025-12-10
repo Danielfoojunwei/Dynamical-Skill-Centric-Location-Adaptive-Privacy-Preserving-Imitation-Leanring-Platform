@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react'
-import { Activity, Server, Shield, LayoutDashboard, Settings, Cloud } from 'lucide-react'
+import { Activity, Server, Shield, LayoutDashboard, Settings, Cloud, Play } from 'lucide-react'
 import Dashboard from './Dashboard'
 import DeviceManager from './DeviceManager'
 import SettingsPage from './Settings'
 import SafetyPage from './Safety'
 import CloudIntegration from './CloudIntegration'
+import SimulationDashboard from './SimulationDashboard'
 import { fetchWithAuth } from './api'
 
 
@@ -52,6 +53,9 @@ function App() {
           <button onClick={() => setView('dashboard')} className={`nav-item ${view === 'dashboard' ? 'active' : ''}`}>
             <LayoutDashboard size={20} /> Dashboard
           </button>
+          <button onClick={() => setView('simulation')} className={`nav-item ${view === 'simulation' ? 'active' : ''}`}>
+            <Play size={20} /> Simulation
+          </button>
           <button onClick={() => setView('devices')} className={`nav-item ${view === 'devices' ? 'active' : ''}`}>
             <Server size={20} /> Devices
           </button>
@@ -69,6 +73,7 @@ function App() {
 
       <main className="main-content">
         {view === 'dashboard' && <Dashboard state={systemState} onStart={handleStart} onStop={handleStop} />}
+        {view === 'simulation' && <SimulationDashboard />}
         {view === 'devices' && <DeviceManager />}
         {view === 'safety' && <SafetyPage />}
         {view === 'cloud' && <CloudIntegration />}
