@@ -97,3 +97,27 @@ pytest-asyncio>=0.21.0
 # =============================================================================
 # tenseal>=0.3.0  # For FHE encryption
 # cryptography>=41.0.0
+
+# =============================================================================
+# Meta AI Models (DINOv3, SAM3, V-JEPA 2)
+# =============================================================================
+# These models require torch hub or manual download from Meta's repos
+
+# DINOv3 dependencies
+timm>=0.9.0                 # Vision transformer implementations
+
+# SAM3 dependencies
+# Install from: github.com/facebookresearch/sam3
+# pip install git+https://github.com/facebookresearch/sam3.git
+
+# V-JEPA 2 dependencies
+# Install from: github.com/facebookresearch/vjepa2
+# pip install git+https://github.com/facebookresearch/vjepa2.git
+
+# Shared dependencies for Meta AI models
+einops>=0.6.0               # Tensor operations
+ftfy>=6.1.0                 # Text processing for CLIP-style models
+regex>=2023.0               # Text tokenization
+
+# Optional: Flash Attention for faster inference
+# pip install flash-attn --no-build-isolation

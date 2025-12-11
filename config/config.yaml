@@ -51,3 +51,58 @@ retargeting:
     max_position_error: 0.05
     max_rotation_error: 0.2
     fallback_to_previous: true
+
+# =============================================================================
+# Meta AI Models Configuration
+# =============================================================================
+meta_ai:
+  # DINOv3 Vision Encoder
+  dinov3:
+    enabled: true
+    model_size: "vit_large"          # vit_small, vit_base, vit_large, vit_giant
+    input_size: 518
+    use_fp16: true
+    cache_dir: "/var/lib/dynamical/models/dinov3"
+
+  # SAM3 Text-Driven Segmentation
+  sam3:
+    enabled: true
+    model_size: "sam3_large"         # sam3_tiny, sam3_small, sam3_base, sam3_large
+    input_size: 1024
+    max_objects: 10
+    confidence_threshold: 0.5
+    enable_tracking: true
+    cache_dir: "/var/lib/dynamical/models/sam3"
+
+  # V-JEPA 2 World Model
+  vjepa2:
+    enabled: true
+    model_size: "vjepa2_large"       # vjepa2_small, vjepa2_base, vjepa2_large, vjepa2_huge
+    num_frames: 16
+    prediction_horizon: 16
+    enable_safety_prediction: true
+    collision_threshold: 0.7
+    emergency_stop_threshold: 0.9
+    cache_dir: "/var/lib/dynamical/models/vjepa2"
+
+  # Privacy settings (N2HE encryption)
+  privacy:
+    enabled: true
+    security_bits: 128
+    lwe_dimension: 1024
+    enable_homomorphic_routing: true
+
+  # Unified pipeline settings
+  pipeline:
+    fusion_method: "concat"          # concat, attention, mlp
+    safety_rate_hz: 1000.0           # Safety tier (V-JEPA 2 collision prediction)
+    control_rate_hz: 100.0           # Control tier (full perception)
+    learning_rate_hz: 10.0           # Learning tier (skill updates)
+    cloud_rate_hz: 0.1               # Cloud tier (federated sync)
+
+  # TFLOPS allocation for Meta AI models
+  tflops_allocation:
+    dinov3: 8.0                      # ViT-L inference
+    sam3: 15.0                       # Full SAM3 inference
+    vjepa2: 10.0                     # World model + safety prediction
+    total: 33.0                      # Leaves 83 TFLOPS for other components
