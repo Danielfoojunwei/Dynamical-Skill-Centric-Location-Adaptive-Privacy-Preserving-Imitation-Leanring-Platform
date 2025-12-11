@@ -660,7 +660,7 @@ async def get_fhe_audit():
 
 # --- Device Management: ONVIF PTZ Control ---
 
-from src.drivers.onvif_ptz import ONVIFPTZController, MockPTZController, PTZDirection
+from src.drivers.onvif_ptz import ONVIFPTZController, PTZDirection
 
 # PTZ controller instances (camera_id -> controller)
 ptz_controllers: Dict[str, ONVIFPTZController] = {}

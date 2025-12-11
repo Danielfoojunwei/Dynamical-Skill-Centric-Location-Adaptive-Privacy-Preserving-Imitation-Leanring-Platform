@@ -742,107 +742,68 @@ class ONVIFPTZController:
 
 
 # =============================================================================
-# Mock Controller for Testing
-# =============================================================================
-
-class MockPTZController(ONVIFPTZController):
-    """Mock PTZ controller for testing without real camera."""
-
-    def __init__(self, host: str = "mock", **kwargs):
-        self.host = host
-        self._connected = False
-        self._status = PTZStatus()
-        self._presets = {
-            "home": PTZPreset(token="1", name="home", position=(0, 0, 0.5)),
-            "preset1": PTZPreset(token="2", name="preset1", position=(0.5, 0.3, 0.3)),
-        }
-        self._limits = PTZLimits()
-        self._lock = threading.Lock()
-
-    def connect(self) -> bool:
-        self._connected = True
-        logger.info(f"Mock PTZ connected to {self.host}")
-        return True
-
-    def disconnect(self):
-        self._connected = False
-
-    def move(self, direction: PTZDirection, speed: float = 0.5, timeout_s: float = 0.0) -> bool:
-        if direction == PTZDirection.LEFT:
-            self._status.pan = max(-1.0, self._status.pan - 0.1 * speed)
-        elif direction == PTZDirection.RIGHT:
-            self._status.pan = min(1.0, self._status.pan + 0.1 * speed)
-        elif direction == PTZDirection.UP:
-            self._status.tilt = min(1.0, self._status.tilt + 0.1 * speed)
-        elif direction == PTZDirection.DOWN:
-            self._status.tilt = max(-1.0, self._status.tilt - 0.1 * speed)
-        elif direction == PTZDirection.ZOOM_IN:
-            self._status.zoom = min(1.0, self._status.zoom + 0.1 * speed)
-        elif direction == PTZDirection.ZOOM_OUT:
-            self._status.zoom = max(0.0, self._status.zoom - 0.1 * speed)
-
-        self._status.timestamp = time.time()
-        return True
-
-    def move_absolute(self, pan: float, tilt: float, zoom: float, speed: float = 0.5) -> bool:
-        self._status.pan = max(-1.0, min(1.0, pan))
-        self._status.tilt = max(-1.0, min(1.0, tilt))
-        self._status.zoom = max(0.0, min(1.0, zoom))
-        self._status.timestamp = time.time()
-        return True
-
-    def stop(self) -> bool:
-        self._status.moving = False
-        return True
-
-    def get_status(self) -> PTZStatus:
-        return self._status
-
-
-# =============================================================================
 # Testing
 # =============================================================================
 
 def test_ptz_controller():
-    """Test PTZ controller."""
+    """
+    Test PTZ controller with a real ONVIF camera.
+
+    Set environment variables to test:
+        PTZ_HOST=192.168.1.100
+        PTZ_USER=admin
+        PTZ_PASS=password
+    """
+    import os
+
     print("\n" + "=" * 60)
-    print("ONVIF PTZ CONTROLLER TEST (Mock)")
+    print("ONVIF PTZ CONTROLLER TEST")
     print("=" * 60)
 
-    # Use mock controller
-    ptz = MockPTZController()
-    ptz.connect()
+    host = os.getenv("PTZ_HOST")
+    username = os.getenv("PTZ_USER", "admin")
+    password = os.getenv("PTZ_PASS", "admin")
+
+    if not host:
+        print("\nNo PTZ_HOST environment variable set.")
+        print("Set PTZ_HOST, PTZ_USER, PTZ_PASS to test with a real camera.")
+        print("Skipping hardware test.")
+        return
+
+    print(f"\nConnecting to PTZ camera at {host}...")
+
+    ptz = ONVIFPTZController(
+        host=host,
+        username=username,
+        password=password,
+    )
+
+    if not ptz.connect():
+        print("Failed to connect to PTZ camera.")
+        return
+
+    print("Connected successfully!")
 
     print("\n1. Get Status")
     print("-" * 40)
     status = ptz.get_status()
-    print(f"   Pan: {status.pan}, Tilt: {status.tilt}, Zoom: {status.zoom}")
+    print(f"   Pan: {status.pan:.2f}, Tilt: {status.tilt:.2f}, Zoom: {status.zoom:.2f}")
 
-    print("\n2. Move Commands")
-    print("-" * 40)
-    ptz.move(PTZDirection.RIGHT, speed=0.5)
-    time.sleep(0.1)
-    status = ptz.get_status()
-    print(f"   After RIGHT: Pan={status.pan:.2f}")
-
-    ptz.move(PTZDirection.UP, speed=0.5)
-    time.sleep(0.1)
-    status = ptz.get_status()
-    print(f"   After UP: Tilt={status.tilt:.2f}")
-
-    print("\n3. Absolute Move")
-    print("-" * 40)
-    ptz.move_absolute(0.5, 0.3, 0.8)
-    status = ptz.get_status()
-    print(f"   Position: Pan={status.pan:.2f}, Tilt={status.tilt:.2f}, Zoom={status.zoom:.2f}")
-
-    print("\n4. Presets")
+    print("\n2. Get Presets")
     print("-" * 40)
     presets = ptz.get_presets()
     for preset in presets:
         print(f"   {preset.name}: {preset.position}")
 
+    print("\n3. Get Limits")
+    print("-" * 40)
+    limits = ptz.get_limits()
+    print(f"   Pan: [{limits.pan_min:.2f}, {limits.pan_max:.2f}]")
+    print(f"   Tilt: [{limits.tilt_min:.2f}, {limits.tilt_max:.2f}]")
+    print(f"   Zoom: [{limits.zoom_min:.2f}, {limits.zoom_max:.2f}]")
+
     ptz.disconnect()
+    print("\nDisconnected.")
 
     print("\n" + "=" * 60)
     print("PTZ CONTROLLER TESTS COMPLETE")

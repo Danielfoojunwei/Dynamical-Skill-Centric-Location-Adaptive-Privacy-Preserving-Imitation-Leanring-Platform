@@ -19,17 +19,28 @@ tflops_budget:
   safe_utilization: 0.85
   burst_utilization: 0.95
   allocations:
+    # Tier 1 - Safety (1kHz)
     safety_detection: 15.0
-    spatial_brain: 3.0
-    navigation_detection: 40.0
+
+    # Tier 2 - Perception (100Hz) - Optimized with Meta AI
+    navigation_detection: 30.0          # Reduced: SAM3 handles segmentation
     depth_estimation: 5.0
-    trajectory_prediction: 0.5
+    full_perception: 15.0               # Reduced: DINOv3 handles features
+
+    # Tier 2 - Action (100Hz)
+    pi0_vla: 10.0
+
+    # Tier 3 - Learning (10Hz)
     il_training: 9.0
     moai_compression: 3.0
-    fhe_encryption: 1.0
-    pi0_vla: 10.0
-    full_perception: 30.0
+
+    # Other
+    spatial_brain: 3.0
     anomaly_detection: 3.0
+    fhe_encryption: 1.0
+
+    # REMOVED: trajectory_prediction (was 0.5) - Now handled by V-JEPA 2
+    # Total legacy: 94.0 TFLOPS + Meta AI 33.0 = 127.0 TFLOPS (92.7%)
 
 pipeline:
   queues:

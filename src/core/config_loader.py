@@ -37,16 +37,20 @@ class ModelsConfig(BaseModel):
     yolo_path: Optional[str] = None
 
 class TFLOPSAllocation(BaseModel):
+    """TFLOPS allocation for system components.
+
+    Note: trajectory_prediction removed - now handled by V-JEPA 2 world model.
+    See meta_ai.tflops_allocation for Meta AI model budgets.
+    """
     safety_detection: float = 15.0
     spatial_brain: float = 3.0
-    navigation_detection: float = 40.0
+    navigation_detection: float = 30.0      # Reduced: SAM3 handles segmentation
     depth_estimation: float = 5.0
-    trajectory_prediction: float = 0.5
     il_training: float = 9.0
     moai_compression: float = 3.0
     fhe_encryption: float = 1.0
     pi0_vla: float = 10.0
-    full_perception: float = 30.0
+    full_perception: float = 15.0           # Reduced: DINOv3 handles features
     anomaly_detection: float = 3.0
 
 class TFLOPSBudget(BaseModel):
