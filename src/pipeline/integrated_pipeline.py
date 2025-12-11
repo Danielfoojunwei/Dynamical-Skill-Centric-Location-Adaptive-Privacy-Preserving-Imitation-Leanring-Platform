@@ -133,7 +133,7 @@ from src.platform.cloud.secure_aggregator import SecureAggregator
 from src.platform.safety_manager import safety_manager
 
 # Core
-from src.core.retargeting import Retargeter
+from src.core.gmr_retargeting import Retargeter
 # from src.core.quality.pose_quality import PoseQuality
 # from src.core.quality.integrated_quality import IntegratedQuality
 from src.core.neuracore_client import get_client as get_neuracore_client
@@ -218,28 +218,32 @@ class TFLOPSManager:
                         self.budgets[name] = TFLOPSBudget(name, value, priority=3)
                         
     def _init_default_budgets(self):
-        """Initialize default TFLOPS allocations."""
+        """Initialize default TFLOPS allocations.
+
+        Note: trajectory_prediction removed - now handled by V-JEPA 2 world model.
+        Meta AI models (DINOv3, SAM3, V-JEPA 2) use 33 TFLOPS total.
+        """
         default_budgets = [
             # Tier 1 - Always On (Critical)
             TFLOPSBudget("safety_detection", 15.0, priority=1, is_critical=True, can_throttle=False),
             TFLOPSBudget("spatial_brain", 3.0, priority=1, is_critical=True, can_throttle=False),
-            
-            # Tier 2 - High Priority
-            TFLOPSBudget("navigation_detection", 40.0, priority=2, is_critical=False, can_throttle=True),
+
+            # Tier 2 - Perception (Optimized with Meta AI)
+            TFLOPSBudget("navigation_detection", 30.0, priority=2, is_critical=False, can_throttle=True),
             TFLOPSBudget("depth_estimation", 5.0, priority=2, is_critical=False, can_throttle=True),
-            TFLOPSBudget("trajectory_prediction", 0.5, priority=2, is_critical=False, can_throttle=True),
-            
-            # Tier 3 - Background
+            TFLOPSBudget("full_perception", 15.0, priority=2, is_critical=False, can_throttle=True),
+
+            # Tier 3 - Learning
             TFLOPSBudget("il_training", 9.0, priority=3, is_critical=False, can_throttle=True),
             TFLOPSBudget("moai_compression", 3.0, priority=3, is_critical=False, can_throttle=True),
             TFLOPSBudget("fhe_encryption", 1.0, priority=3, is_critical=False, can_throttle=True),
-            
-            TFLOPSBudget("fhe_encryption", 1.0, priority=3, is_critical=False, can_throttle=True),
-            
-            # Tier 4 - On-Demand
+
+            # Tier 4 - Action
             TFLOPSBudget("pi0_vla", 10.0, priority=4, is_critical=False, can_throttle=True),
-            TFLOPSBudget("full_perception", 30.0, priority=4, is_critical=False, can_throttle=True),
             TFLOPSBudget("anomaly_detection", 3.0, priority=4, is_critical=False, can_throttle=True),
+
+            # Meta AI Models (managed separately via meta_ai config)
+            # DINOv3: 8.0 TFLOPS, SAM3: 15.0 TFLOPS, V-JEPA 2: 10.0 TFLOPS
         ]
         
         for budget in default_budgets:
