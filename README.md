@@ -1,6 +1,6 @@
-# Dynamical Edge Platform v0.3.2
+# Dynamical Edge Platform v0.3.3
 
-![Version](https://img.shields.io/badge/version-0.3.2-blue)
+![Version](https://img.shields.io/badge/version-0.3.3-blue)
 ![Status](https://img.shields.io/badge/status-Production-green)
 ![License](https://img.shields.io/badge/license-Proprietary-red)
 
@@ -18,6 +18,18 @@ The Dynamical Edge Platform is a production-ready software stack for humanoid ro
 - **Dynamic Task Routing**: Natural language → automatic skill selection
 - **Skill Blending**: Combine multiple skills for complex tasks
 
+### Meta AI Foundation Models (NEW in v0.3.3)
+- **DINOv2/DINOv3**: Self-supervised visual features (8 TFLOPS)
+  - Patch-based feature extraction at multiple scales
+  - Cross-frame temporal consistency
+- **SAM 3 (Segment Anything)**: Zero-shot segmentation (15 TFLOPS)
+  - Automatic mask generation for objects/humans
+  - Privacy-aware face/hand region masking
+- **V-JEPA 2**: Video prediction & world modeling (10 TFLOPS)
+  - Latent video prediction (replaces trajectory_prediction)
+  - Action-conditioned future state estimation
+- **Unified Perception Pipeline**: Multi-model fusion with privacy wrapper
+
 ### Privacy-Preserving Learning
 - **N2HE Encryption**: 128-bit homomorphic encryption for gradients
 - **Federated Aggregation**: Learn from fleet without sharing raw data
@@ -29,7 +41,10 @@ The Dynamical Edge Platform is a production-ready software stack for humanoid ro
   - Tier 2: Control Loop @ 100Hz
   - Tier 3: Learning Loop @ 10Hz
   - Tier 4: Cloud Sync @ 0.1Hz
-- **137 TFLOPS Budget Management**: Intelligent workload scheduling
+- **137 TFLOPS Budget Management**: 127 TFLOPS allocated (92.7% utilization)
+  - Meta AI Models: 33 TFLOPS (DINOv3 8 + SAM3 15 + V-JEPA 2 10)
+  - Safety & Perception: 65 TFLOPS
+  - VLA & Skills: 29 TFLOPS
 
 ### Comprehensive UI
 - **Dashboard**: System status, TFLOPS usage, component monitoring
@@ -45,16 +60,20 @@ The Dynamical Edge Platform is a production-ready software stack for humanoid ro
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                        DYNAMICAL EDGE PLATFORM                              │
+│                     DYNAMICAL EDGE PLATFORM v0.3.3                          │
 ├─────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
 │  ┌──────────────────────────────────────────────────────────────────────┐   │
-│  │                         PERCEPTION LAYER                              │   │
+│  │                    PERCEPTION LAYER (Meta AI Enhanced)                │   │
 │  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐             │   │
-│  │  │ RTMPose  │  │  YOLO    │  │  Depth   │  │  Multi-  │             │   │
-│  │  │ 133-pt   │  │  v8l     │  │ Anything │  │  Camera  │             │   │
-│  │  │ Wholebody│  │Detection │  │  v2      │  │  Fusion  │             │   │
+│  │  │ DINOv3   │  │  SAM 3   │  │ V-JEPA 2 │  │  Multi-  │             │   │
+│  │  │ Features │  │ Segment  │  │  World   │  │  Camera  │             │   │
+│  │  │ (8 TF)   │  │ (15 TF)  │  │ (10 TF)  │  │  Fusion  │             │   │
 │  │  └──────────┘  └──────────┘  └──────────┘  └──────────┘             │   │
+│  │        │              │             │             │                  │   │
+│  │        └──────────────┴─────────────┴─────────────┘                  │   │
+│  │                    Unified Perception Pipeline                        │   │
+│  │                    (Privacy Wrapper + N2HE)                          │   │
 │  └──────────────────────────────────────────────────────────────────────┘   │
 │                                    │                                         │
 │  ┌──────────────────────────────────────────────────────────────────────┐   │
@@ -178,6 +197,14 @@ Open in browser: `http://localhost:8000`
 │   │   ├── dyglove.py               # Haptic glove driver
 │   │   ├── glove_calibration.py     # 21-DOF calibration
 │   │   └── daimon_vtla.py           # Robot driver
+│   │
+│   ├── models/                  # Meta AI Foundation Models (NEW)
+│   │   ├── meta_ai/
+│   │   │   ├── dinov3.py            # DINOv3 visual features (8 TF)
+│   │   │   ├── sam3.py              # SAM 3 segmentation (15 TF)
+│   │   │   ├── vjepa2.py            # V-JEPA 2 world model (10 TF)
+│   │   │   ├── privacy_wrapper.py   # N2HE encryption wrapper
+│   │   │   └── unified_perception.py # Multi-model fusion pipeline
 │   │
 │   ├── platform/
 │   │   ├── api/                     # REST API (FastAPI)
@@ -349,6 +376,9 @@ See: [Research Paper](docs/research/dynamical_moe_skills_paper.md)
 | OpenCV | Apache 2.0 | Computer vision |
 | MMPose | Apache 2.0 | Pose estimation |
 | Pinocchio | BSD | Robot kinematics |
+| DINOv2/v3 | Apache 2.0 | Self-supervised visual features (Meta AI) |
+| SAM 2/3 | Apache 2.0 | Segment Anything model (Meta AI) |
+| V-JEPA | CC-BY-NC | Video prediction (Meta AI, non-commercial) |
 
 ---
 
@@ -370,6 +400,7 @@ Proprietary - Dynamical.ai © 2024
 
 | Version | Date | Highlights |
 |---------|------|------------|
+| 0.3.3 | Dec 2024 | **Meta AI Integration**: DINOv3, SAM3, V-JEPA 2 models; unified perception pipeline; mock code cleanup |
 | 0.3.2 | Dec 2024 | User documentation, ONVIF PTZ, glove calibration |
 | 0.3.1 | Dec 2024 | Comprehensive UI (Skills, Training, Observability) |
 | 0.3.0 | Dec 2024 | MoE skill architecture, N2HE encryption |
