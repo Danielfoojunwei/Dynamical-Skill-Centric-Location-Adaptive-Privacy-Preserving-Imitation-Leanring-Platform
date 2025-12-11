@@ -1025,6 +1025,234 @@ async def get_invoker_stats():
     return robot_skill_invoker.get_statistics()
 
 
+# =============================================================================
+# Meta AI Perception API
+# =============================================================================
+# These endpoints manage the Meta AI foundation models (DINOv3, SAM3, V-JEPA 2)
+
+# In-memory state for Meta AI models (in production, this would be from actual model managers)
+meta_ai_state = {
+    "models": {
+        "dinov3": {
+            "id": "dinov3",
+            "name": "DINOv3",
+            "description": "Self-supervised visual features with patch-based extraction",
+            "version": "ViT-L/14",
+            "enabled": True,
+            "status": "running",
+            "tflops": 8.0,
+            "latency_ms": 12,
+            "model_size": "vit_large",
+            "input_size": 518,
+            "config": {
+                "model_size": "vit_large",
+                "input_size": 518,
+                "use_fp16": True,
+                "cache_dir": "/var/lib/dynamical/models/dinov3"
+            }
+        },
+        "sam3": {
+            "id": "sam3",
+            "name": "SAM 3",
+            "description": "Zero-shot segmentation with text prompts and tracking",
+            "version": "SAM3-Large",
+            "enabled": True,
+            "status": "running",
+            "tflops": 15.0,
+            "latency_ms": 25,
+            "model_size": "sam3_large",
+            "input_size": 1024,
+            "config": {
+                "model_size": "sam3_large",
+                "input_size": 1024,
+                "max_objects": 10,
+                "confidence_threshold": 0.5,
+                "enable_tracking": True,
+                "cache_dir": "/var/lib/dynamical/models/sam3"
+            }
+        },
+        "vjepa2": {
+            "id": "vjepa2",
+            "name": "V-JEPA 2",
+            "description": "Video prediction and world modeling for safety",
+            "version": "V-JEPA2-Large",
+            "enabled": True,
+            "status": "running",
+            "tflops": 10.0,
+            "latency_ms": 18,
+            "model_size": "vjepa2_large",
+            "input_size": 224,
+            "config": {
+                "model_size": "vjepa2_large",
+                "num_frames": 16,
+                "prediction_horizon": 16,
+                "enable_safety_prediction": True,
+                "collision_threshold": 0.7,
+                "emergency_stop_threshold": 0.9,
+                "cache_dir": "/var/lib/dynamical/models/vjepa2"
+            }
+        }
+    },
+    "privacy": {
+        "enabled": True,
+        "security_bits": 128,
+        "lwe_dimension": 1024,
+        "enable_homomorphic_routing": True
+    },
+    "pipeline": {
+        "running": True,
+        "fusion_method": "concat",
+        "safety_rate_hz": 1000.0,
+        "control_rate_hz": 100.0,
+        "learning_rate_hz": 10.0,
+        "cloud_rate_hz": 0.1
+    },
+    "safety_predictions": {
+        "collision_prob": 0.0,
+        "horizon": 16,
+        "time_to_impact": -1
+    }
+}
+
+class MetaAIModelConfigUpdate(BaseModel):
+    config: Dict[str, Any]
+
+class MetaAIModelEnableRequest(BaseModel):
+    enabled: bool
+
+class MetaAIPrivacyUpdate(BaseModel):
+    enabled: Optional[bool] = None
+    security_bits: Optional[int] = None
+    lwe_dimension: Optional[int] = None
+    enable_homomorphic_routing: Optional[bool] = None
+
+@app.get("/api/perception/models", dependencies=[Depends(get_api_key)])
+async def get_perception_models():
+    """Get list of Meta AI perception models and their status."""
+    return list(meta_ai_state["models"].values())
+
+@app.get("/api/perception/models/{model_id}", dependencies=[Depends(get_api_key)])
+async def get_perception_model(model_id: str):
+    """Get a specific Meta AI model's details."""
+    if model_id not in meta_ai_state["models"]:
+        raise HTTPException(status_code=404, detail=f"Model {model_id} not found")
+    return meta_ai_state["models"][model_id]
+
+@app.post("/api/perception/models/{model_id}/enable", dependencies=[Depends(get_api_key)])
+async def enable_perception_model(model_id: str, request: MetaAIModelEnableRequest):
+    """Enable or disable a Meta AI model."""
+    if model_id not in meta_ai_state["models"]:
+        raise HTTPException(status_code=404, detail=f"Model {model_id} not found")
+
+    meta_ai_state["models"][model_id]["enabled"] = request.enabled
+    meta_ai_state["models"][model_id]["status"] = "running" if request.enabled else "stopped"
+
+    logger.info(f"Meta AI model {model_id} {'enabled' if request.enabled else 'disabled'}")
+
+    return {
+        "success": True,
+        "model_id": model_id,
+        "enabled": request.enabled,
+        "status": meta_ai_state["models"][model_id]["status"]
+    }
+
+@app.get("/api/perception/models/{model_id}/config", dependencies=[Depends(get_api_key)])
+async def get_perception_model_config(model_id: str):
+    """Get a Meta AI model's configuration."""
+    if model_id not in meta_ai_state["models"]:
+        raise HTTPException(status_code=404, detail=f"Model {model_id} not found")
+    return meta_ai_state["models"][model_id]["config"]
+
+@app.post("/api/perception/models/{model_id}/config", dependencies=[Depends(get_api_key)])
+async def update_perception_model_config(model_id: str, request: MetaAIModelConfigUpdate):
+    """Update a Meta AI model's configuration."""
+    if model_id not in meta_ai_state["models"]:
+        raise HTTPException(status_code=404, detail=f"Model {model_id} not found")
+
+    # Merge config updates
+    meta_ai_state["models"][model_id]["config"].update(request.config)
+
+    # Update model_size and input_size in the model info if changed
+    if "model_size" in request.config:
+        meta_ai_state["models"][model_id]["model_size"] = request.config["model_size"]
+    if "input_size" in request.config:
+        meta_ai_state["models"][model_id]["input_size"] = request.config["input_size"]
+
+    logger.info(f"Meta AI model {model_id} config updated: {request.config}")
+
+    return {
+        "success": True,
+        "model_id": model_id,
+        "config": meta_ai_state["models"][model_id]["config"]
+    }
+
+@app.get("/api/perception/privacy", dependencies=[Depends(get_api_key)])
+async def get_perception_privacy():
+    """Get privacy wrapper (N2HE) settings."""
+    return meta_ai_state["privacy"]
+
+@app.post("/api/perception/privacy", dependencies=[Depends(get_api_key)])
+async def update_perception_privacy(request: MetaAIPrivacyUpdate):
+    """Update privacy wrapper settings."""
+    if request.enabled is not None:
+        meta_ai_state["privacy"]["enabled"] = request.enabled
+    if request.security_bits is not None:
+        meta_ai_state["privacy"]["security_bits"] = request.security_bits
+    if request.lwe_dimension is not None:
+        meta_ai_state["privacy"]["lwe_dimension"] = request.lwe_dimension
+    if request.enable_homomorphic_routing is not None:
+        meta_ai_state["privacy"]["enable_homomorphic_routing"] = request.enable_homomorphic_routing
+
+    logger.info(f"Privacy settings updated: {meta_ai_state['privacy']}")
+
+    return {
+        "success": True,
+        **meta_ai_state["privacy"]
+    }
+
+@app.get("/api/perception/pipeline/status", dependencies=[Depends(get_api_key)])
+async def get_perception_pipeline_status():
+    """Get unified perception pipeline status."""
+    # Calculate if pipeline should be running based on enabled models
+    active_models = [m for m in meta_ai_state["models"].values() if m["enabled"]]
+    meta_ai_state["pipeline"]["running"] = len(active_models) > 0 and state.is_running
+
+    return meta_ai_state["pipeline"]
+
+@app.get("/api/perception/safety/predictions", dependencies=[Depends(get_api_key)])
+async def get_safety_predictions():
+    """Get V-JEPA 2 safety predictions."""
+    # In production, this would come from the actual V-JEPA 2 model
+    # For now, simulate based on system state
+    import random
+
+    if state.is_running and meta_ai_state["models"]["vjepa2"]["enabled"]:
+        # Simulate collision probability (normally low)
+        meta_ai_state["safety_predictions"]["collision_prob"] = random.uniform(0.0, 0.15)
+        meta_ai_state["safety_predictions"]["time_to_impact"] = -1 if meta_ai_state["safety_predictions"]["collision_prob"] < 0.5 else random.uniform(2.0, 5.0)
+    else:
+        meta_ai_state["safety_predictions"]["collision_prob"] = 0.0
+        meta_ai_state["safety_predictions"]["time_to_impact"] = -1
+
+    return meta_ai_state["safety_predictions"]
+
+@app.get("/api/perception/tflops", dependencies=[Depends(get_api_key)])
+async def get_perception_tflops():
+    """Get TFLOPS allocation for Meta AI models."""
+    active_tflops = sum(
+        m["tflops"] for m in meta_ai_state["models"].values() if m["enabled"]
+    )
+    return {
+        "models": {
+            model_id: {"tflops": m["tflops"], "enabled": m["enabled"]}
+            for model_id, m in meta_ai_state["models"].items()
+        },
+        "total_allocated": 33.0,
+        "total_active": active_tflops,
+        "utilization_percent": (active_tflops / 33.0) * 100
+    }
+
+
 # --- Static Files (Production) ---
 # Mount static assets if they exist (for production build)
 # MOVED TO END TO AVOID SHADOWING API ROUTES

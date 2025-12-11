@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Activity, Server, Shield, LayoutDashboard, Settings, Cloud, Zap, Eye, Database, Bot } from 'lucide-react'
+import { Activity, Server, Shield, LayoutDashboard, Settings, Cloud, Zap, Eye, Database, Bot, Brain } from 'lucide-react'
 import Dashboard from './Dashboard'
 import DeviceManager from './DeviceManager'
 import SettingsPage from './Settings'
@@ -8,6 +8,7 @@ import CloudIntegration from './CloudIntegration'
 import SkillsManager from './SkillsManager'
 import Observability from './Observability'
 import TrainingManager from './TrainingManager'
+import PerceptionManager from './PerceptionManager'
 import { fetchWithAuth } from './api'
 
 
@@ -49,6 +50,7 @@ function App() {
 
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'perception', label: 'Perception', icon: Brain },
     { id: 'devices', label: 'Devices', icon: Server },
     { id: 'skills', label: 'Skills', icon: Zap },
     { id: 'observability', label: 'Observability', icon: Eye },
@@ -64,7 +66,7 @@ function App() {
         <div className="logo">
           <Bot size={24} color="#3b82f6" />
           <span>Dynamical Edge</span>
-          <span className="text-xs text-gray-500 ml-1">v0.3.2</span>
+          <span className="text-xs text-gray-500 ml-1">v0.3.3</span>
         </div>
 
         <div className="nav-items">
@@ -97,6 +99,7 @@ function App() {
 
       <main className="main-content">
         {view === 'dashboard' && <Dashboard state={systemState} onStart={handleStart} onStop={handleStop} />}
+        {view === 'perception' && <PerceptionManager />}
         {view === 'devices' && <DeviceManager />}
         {view === 'skills' && <SkillsManager />}
         {view === 'observability' && <Observability />}
