@@ -1,91 +1,148 @@
-# Dynamical Edge Platform v0.3.2
+# Dynamical Edge Platform v0.4.0
 
-![Version](https://img.shields.io/badge/version-0.3.2-blue)
+![Version](https://img.shields.io/badge/version-0.4.0-blue)
 ![Status](https://img.shields.io/badge/status-Production-green)
 ![License](https://img.shields.io/badge/license-Proprietary-red)
 
-> **Skill-Centric Federated Learning for Vision-Language-Action Models on Edge Robotics**
+> **On-Device Runtime and Training Engine for Humanoid Robots**
 
-The Dynamical Edge Platform is a production-ready software stack for humanoid robots running on NVIDIA Jetson AGX Orin 32GB. It features a novel **Mixture-of-Experts (MoE) skill architecture** with **privacy-preserving federated learning** using homomorphic encryption.
+The Dynamical Edge Platform is a clean, on-device runtime and training engine that exposes standardized interfaces for skill execution and federated learning. It runs on NVIDIA Jetson AGX Orin 32GB and features a **Mixture-of-Experts (MoE) skill architecture** with **privacy-preserving federated learning**.
+
+**Key Design Principle**: Dynamical handles single-robot skill execution and on-device training. Multi-robot coordination and cross-site orchestration are handled by **SwarmBridge** and **SwarmBrain** services, which communicate with Dynamical via standardized APIs.
+
+---
+
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                           DYNAMICAL EDGE PLATFORM                                │
+│                    (On-Device Runtime & Training Engine)                         │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  ┌────────────────────────────────────────────────────────────────────────────┐ │
+│  │                    SKILL INVOCATION API (Unified)                          │ │
+│  │                                                                            │ │
+│  │    POST /api/v1/robot/invoke_skill                                         │ │
+│  │    POST /api/v1/robot/execute_skill                                        │ │
+│  │                                                                            │ │
+│  │    Inputs: robot_id, skill_id, role, goal, coordination_id                 │ │
+│  │    Returns: actions[], skill_ids_used, blend_weights, safety_status        │ │
+│  │                                                                            │ │
+│  └────────────────────────────────────────────────────────────────────────────┘ │
+│                                      │                                           │
+│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐                  │
+│  │   PERCEPTION    │  │  VLA + MoE      │  │    CONTROL      │                  │
+│  │   ───────────   │  │  ─────────      │  │    ───────      │                  │
+│  │  • RTMPose      │  │  • Pi0/OpenVLA  │  │  • Safety Mgr   │                  │
+│  │  • Depth        │  │  • Skill Router │  │  • Retargeting  │                  │
+│  │  • Multi-Cam    │  │  • Skill Blend  │  │  • Robot Cmds   │                  │
+│  └─────────────────┘  └─────────────────┘  └─────────────────┘                  │
+│                                      │                                           │
+│  ┌────────────────────────────────────────────────────────────────────────────┐ │
+│  │                    SHARED CRYPTO LIBRARY                                   │ │
+│  │                                                                            │ │
+│  │    src/shared/crypto/fhe_backend.py                                        │ │
+│  │    • TenSEALBackend (CKKS, 128-bit) - Production                          │ │
+│  │    • N2HEBackend (LWE) - Research fallback                                │ │
+│  │    • MockFHEBackend - Development                                         │ │
+│  │                                                                            │ │
+│  └────────────────────────────────────────────────────────────────────────────┘ │
+│                                      │                                           │
+│  ┌────────────────────────────────────────────────────────────────────────────┐ │
+│  │                    FEDERATED LEARNING                                      │ │
+│  │                                                                            │ │
+│  │    • Gradient encryption (homomorphic)                                     │ │
+│  │    • Flower-based FL server                                               │ │
+│  │    • Differential privacy (epsilon tracking)                              │ │
+│  │                                                                            │ │
+│  └────────────────────────────────────────────────────────────────────────────┘ │
+│                                                                                  │
+└──────────────────────────────────────────────────────────────────────────────────┘
+                                       │
+                                       ▼
+┌──────────────────────────────────────────────────────────────────────────────────┐
+│                         EXTERNAL ORCHESTRATION                                    │
+│                     (SwarmBridge / SwarmBrain)                                   │
+├──────────────────────────────────────────────────────────────────────────────────┤
+│  • Multi-robot coordination                                                      │
+│  • Cross-site orchestration                                                      │
+│  • Central FL service                                                            │
+│  • Skill registry                                                                │
+│                                                                                  │
+│  Communicates via Dynamical's standardized APIs with:                            │
+│    - robot_id, role (leader/follower/observer/independent/assistant)            │
+│    - coordination_id for multi-robot tasks                                       │
+│    - CoordinationMetadata in skill artifacts                                     │
+└──────────────────────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
 ## Key Features
 
+### Unified Skill Invocation API
+
+Single API for all skill execution, supporting both autonomous operation and coordinated multi-robot scenarios:
+
+```python
+POST /api/v1/robot/invoke_skill
+{
+    "robot_id": "orin_001",
+    "role": "leader",           # leader, follower, observer, independent, assistant
+    "goal": "pick up the cup",
+    "coordination_id": "task_123",
+    "skill_ids": ["grasp_v2", "pour_v1"],
+    "mode": "blended",
+    "max_skills": 3
+}
+```
+
 ### MoE Skill Architecture
 - **Frozen Base VLA Models**: Pi0/OpenVLA-7B remain read-only (IP-safe)
 - **Trainable Skill Experts**: Lightweight skills that augment base models
 - **Dynamic Task Routing**: Natural language → automatic skill selection
-- **Skill Blending**: Combine multiple skills for complex tasks
+- **Skill Blending**: Combine multiple skills with MoE routing weights
+
+### Shared Crypto Library
+Unified FHE interface used by both edge and cloud components:
+
+```python
+from src.shared.crypto import create_fhe_backend
+
+# Auto-selects best available backend
+backend = create_fhe_backend()
+
+# Encrypt gradients for federated learning
+encrypted = backend.encrypt(gradients)
+
+# Homomorphic aggregation (server-side)
+aggregated = backend.homomorphic_sum([enc1, enc2, enc3])
+```
+
+### Coordination Metadata Support
+Skills include coordination metadata for SwarmBridge integration:
+
+```python
+@dataclass
+class CoordinationMetadata:
+    supported_roles: List[str]     # ["leader", "follower"]
+    requires_leader: bool          # True for coordinated skills
+    sync_mode: str                 # "none", "loose", "strict", "realtime"
+    min_robots: int
+    max_robots: int
+```
+
+### 4-Tier Real-Time Control
+- **Tier 1**: Safety Loop @ 1kHz (never throttled)
+- **Tier 2**: Control Loop @ 100Hz
+- **Tier 3**: Learning Loop @ 10Hz
+- **Tier 4**: Cloud Sync @ 0.1Hz
 
 ### Privacy-Preserving Learning
-- **N2HE Encryption**: 128-bit homomorphic encryption for gradients
-- **Federated Aggregation**: Learn from fleet without sharing raw data
+- **TenSEAL/N2HE**: 128-bit homomorphic encryption for gradients
+- **Flower Framework**: Production federated learning
 - **Encrypted Skill Storage**: Skills encrypted at rest and in transit
-
-### Real-Time Control
-- **4-Tier Timing System**:
-  - Tier 1: Safety Loop @ 1kHz (never throttled)
-  - Tier 2: Control Loop @ 100Hz
-  - Tier 3: Learning Loop @ 10Hz
-  - Tier 4: Cloud Sync @ 0.1Hz
-- **137 TFLOPS Budget Management**: Intelligent workload scheduling
-
-### Comprehensive UI
-- **Dashboard**: System status, TFLOPS usage, component monitoring
-- **Device Manager**: ONVIF PTZ cameras, DYGlove calibration, robot control
-- **Skills Manager**: MoE task routing, skill upload/download
-- **Training Manager**: Datasets, jobs, version control, FL status
-- **Observability**: Flight recorder, VLA status, FHE audit, RCA
-- **Safety**: Interactive zone drawing, hazard configuration
-
----
-
-## System Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                        DYNAMICAL EDGE PLATFORM                              │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  ┌──────────────────────────────────────────────────────────────────────┐   │
-│  │                         PERCEPTION LAYER                              │   │
-│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐             │   │
-│  │  │ RTMPose  │  │  YOLO    │  │  Depth   │  │  Multi-  │             │   │
-│  │  │ 133-pt   │  │  v8l     │  │ Anything │  │  Camera  │             │   │
-│  │  │ Wholebody│  │Detection │  │  v2      │  │  Fusion  │             │   │
-│  │  └──────────┘  └──────────┘  └──────────┘  └──────────┘             │   │
-│  └──────────────────────────────────────────────────────────────────────┘   │
-│                                    │                                         │
-│  ┌──────────────────────────────────────────────────────────────────────┐   │
-│  │                         VLA + MoE SKILLS                              │   │
-│  │  ┌────────────────────┐    ┌─────────────────────────────────────┐   │   │
-│  │  │  Base VLA (Frozen) │    │        MoE Skill Router             │   │   │
-│  │  │  ┌──────┐ ┌──────┐ │    │  ┌───────┐ ┌───────┐ ┌───────┐     │   │   │
-│  │  │  │ Pi0  │ │OpenVLA│ │───►│  │Grasp  │ │ Pour  │ │Navigate│    │   │   │
-│  │  │  │ 7B   │ │  7B   │ │    │  │ Skill │ │ Skill │ │ Skill │    │   │   │
-│  │  │  └──────┘ └──────┘ │    │  └───────┘ └───────┘ └───────┘     │   │   │
-│  │  └────────────────────┘    └─────────────────────────────────────┘   │   │
-│  └──────────────────────────────────────────────────────────────────────┘   │
-│                                    │                                         │
-│  ┌──────────────────────────────────────────────────────────────────────┐   │
-│  │                         CONTROL LAYER                                 │   │
-│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐             │   │
-│  │  │  Robot   │  │  Glove   │  │  Safety  │  │Retargeting│            │   │
-│  │  │ Invoker  │  │  Driver  │  │  Manager │  │   GMR    │             │   │
-│  │  └──────────┘  └──────────┘  └──────────┘  └──────────┘             │   │
-│  └──────────────────────────────────────────────────────────────────────┘   │
-│                                    │                                         │
-│  ┌──────────────────────────────────────────────────────────────────────┐   │
-│  │                         CLOUD LAYER (Encrypted)                       │   │
-│  │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐             │   │
-│  │  │  N2HE    │  │  FedAvg  │  │  Skill   │  │  MOAI    │             │   │
-│  │  │ Encrypt  │  │ Aggregator│ │  Library │  │ Compress │             │   │
-│  │  └──────────┘  └──────────┘  └──────────┘  └──────────┘             │   │
-│  └──────────────────────────────────────────────────────────────────────┘   │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
 
 ---
 
@@ -108,14 +165,9 @@ The Dynamical Edge Platform is a production-ready software stack for humanoid ro
 ### 1. Installation
 
 ```bash
-# Clone the repository
 git clone https://github.com/dynamical-ai/edge-platform.git
 cd edge-platform
-
-# Install dependencies
 ./install.sh
-
-# Initialize database
 python -m src.platform.api.database init
 ```
 
@@ -125,41 +177,22 @@ python -m src.platform.api.database init
 python -m src.platform.api.main
 ```
 
-### 3. Access the Dashboard
+### 3. Access Dashboard
 
-Open in browser: `http://localhost:8000`
+Open: `http://localhost:8000`
 
-### 4. Connect Devices
+### 4. Invoke a Skill
 
-1. Go to **Devices** → Click **Scan Network**
-2. Configure cameras with PTZ controls
-3. Calibrate gloves (4-step process)
-
-### 5. Start Operations
-
-1. Go to **Safety** → Draw safety zones
-2. Go to **Dashboard** → Click **START SYSTEM**
-3. Use **Skills** → Enter task description → Click **Route**
-
----
-
-## Documentation
-
-### User Manual (For Operators)
-
-| Guide | Description |
-|-------|-------------|
-| [**Installation Guide**](docs/user-manual/01-installation-guide.md) | Hardware setup, network, first boot |
-| [**Operation Guide**](docs/user-manual/02-operation-guide.md) | All features, step-by-step |
-| [**Post-Deployment Guide**](docs/user-manual/03-post-deployment-guide.md) | Maintenance, updates, troubleshooting |
-
-### Technical Documentation
-
-| Document | Description |
-|----------|-------------|
-| [Setup Guide](docs/SETUP_GUIDE.md) | Technical installation |
-| [Developer Notes](docs/DEVELOPER_NOTES.md) | Architecture, APIs |
-| [Research Paper](docs/research/dynamical_moe_skills_paper.md) | Skill-Centric Federated Learning |
+```bash
+curl -X POST http://localhost:8000/api/v1/robot/invoke_skill \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-api-key" \
+  -d '{
+    "robot_id": "orin_001",
+    "task_description": "pick up the red cup",
+    "mode": "autonomous"
+  }'
+```
 
 ---
 
@@ -167,144 +200,195 @@ Open in browser: `http://localhost:8000`
 
 ```
 ├── src/
-│   ├── core/                    # Core algorithms
-│   │   ├── robot_skill_invoker.py   # Skill invocation pipeline
-│   │   ├── gmr_retargeting.py       # Motion retargeting
-│   │   └── wholebody_pose_pipeline.py
+│   ├── core/                        # Core algorithms
+│   │   ├── robot_skill_invoker.py       # Unified skill invocation
+│   │   ├── whole_body_gmr.py            # Motion retargeting
+│   │   └── wholebody_pose_pipeline.py   # Pose estimation
 │   │
-│   ├── drivers/                 # Hardware interfaces
-│   │   ├── cameras.py               # ONVIF camera driver
-│   │   ├── onvif_ptz.py             # PTZ camera control
-│   │   ├── dyglove.py               # Haptic glove driver
-│   │   ├── glove_calibration.py     # 21-DOF calibration
-│   │   └── daimon_vtla.py           # Robot driver
+│   ├── shared/                      # Shared libraries
+│   │   └── crypto/                      # FHE backends
+│   │       ├── __init__.py
+│   │       └── fhe_backend.py           # TenSEAL, N2HE, Mock
+│   │
+│   ├── drivers/                     # Hardware interfaces
+│   │   ├── onvif_ptz.py                 # PTZ camera control
+│   │   ├── dyglove.py                   # Haptic glove driver
+│   │   └── daimon_vtla.py               # Robot driver
 │   │
 │   ├── platform/
-│   │   ├── api/                     # REST API (FastAPI)
-│   │   │   └── main.py              # All endpoints
-│   │   ├── cloud/                   # Cloud integration
-│   │   │   ├── moe_skill_router.py  # MoE routing
-│   │   │   └── secure_aggregator.py # FL aggregation
-│   │   ├── edge/
-│   │   │   └── skill_client.py      # Edge skill execution
-│   │   ├── ui/                      # React dashboard
+│   │   ├── api/                         # REST API (FastAPI)
+│   │   │   └── main.py                  # All endpoints
+│   │   │
+│   │   ├── cloud/                       # Cloud integration
+│   │   │   ├── moe_skill_router.py      # MoE routing
+│   │   │   ├── secure_aggregator.py     # FL aggregation
+│   │   │   └── federated_learning.py    # Flower FL server
+│   │   │
+│   │   ├── edge/                        # Edge components
+│   │   │   └── skill_client.py          # Skill cache & execution
+│   │   │
+│   │   ├── ui/                          # React dashboard
 │   │   │   └── src/
-│   │   │       ├── App.jsx
 │   │   │       ├── Dashboard.jsx
 │   │   │       ├── DeviceManager.jsx
 │   │   │       ├── SkillsManager.jsx
 │   │   │       ├── TrainingManager.jsx
 │   │   │       ├── Observability.jsx
 │   │   │       └── Safety.jsx
+│   │   │
 │   │   └── safety_manager.py
 │   │
-│   ├── moai/                    # Compression & encryption
-│   │   ├── n2he.py                  # Homomorphic encryption
-│   │   └── moai_pt.py               # Neural compression
-│   │
-│   └── spatial_intelligence/    # VLA models
-│       └── pi0/
-│
-├── docs/
-│   ├── user-manual/             # Operator documentation
-│   └── research/                # Research papers
+│   └── moai/                        # Compression & encryption
+│       ├── n2he.py                      # Legacy N2HE implementation
+│       └── moai_pt.py                   # Neural compression
 │
 ├── config/
-│   └── config.yaml              # System configuration
+│   └── config.yaml                  # System configuration
 │
-└── tests/                       # Test suite
+└── tests/                           # Test suite
 ```
 
 ---
 
 ## API Reference
 
+### Skill Invocation API
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v1/robot/invoke_skill` | POST | Execute skills with role coordination |
+| `/api/v1/robot/execute_skill` | POST | Alias for invoke_skill |
+| `/api/v1/robot/invoker/stats` | GET | Invoker statistics |
+
+**Request Body (invoke_skill)**:
+```json
+{
+    "robot_id": "orin_001",
+    "role": "independent",
+    "goal": "pick up the cup",
+    "coordination_id": null,
+    "task_description": "pick up the red cup",
+    "skill_ids": null,
+    "joint_positions": [0.0, 0.1, ...],
+    "mode": "autonomous",
+    "action_space": "joint_position",
+    "max_skills": 3
+}
+```
+
+**Response**:
+```json
+{
+    "success": true,
+    "request_id": "req_1702500000",
+    "robot_id": "orin_001",
+    "role": "independent",
+    "goal": "pick up the cup",
+    "actions": [...],
+    "skill_ids_used": ["grasp_v2"],
+    "blend_weights": [1.0],
+    "safety_status": "OK",
+    "total_time_ms": 12.5
+}
+```
+
 ### Skills API
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/v1/skills` | GET | List all skills |
-| `/api/v1/skills/request` | POST | Route task to skills |
-| `/api/v1/skills/upload` | POST | Upload new skill |
-| `/api/v1/robot/invoke_skill` | POST | Execute skills on robot |
+| `/api/v1/skills` | POST | Register new skill |
+| `/api/v1/skills/{id}` | GET | Get skill details |
+| `/api/v1/skills/request` | POST | Route task to skills (MoE) |
+| `/api/v1/skills/deploy` | POST | Deploy skills to device |
+
+### Federated Learning API
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v1/fl/register` | POST | Register FL client |
+| `/api/v1/fl/update` | POST | Submit encrypted gradients |
+| `/api/v1/fl/model` | GET | Download global model |
+| `/api/v1/fl/status` | GET | FL server status |
+| `/api/v1/fl/privacy` | GET | Differential privacy budget |
 
 ### Device API
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/devices` | GET | List connected devices |
-| `/devices/scan` | POST | Scan network for devices |
+| `/api/v1/edge-devices` | GET/POST | Manage edge devices |
+| `/api/v1/peripherals` | GET/POST | Manage peripherals |
 | `/api/devices/ptz/{id}/move` | POST | Control PTZ camera |
-| `/api/devices/glove/{id}/calibration/start` | POST | Start glove calibration |
+| `/api/devices/glove/{id}/calibration/start` | POST | Start calibration |
 
 ### Safety API
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/safety/zones` | GET/POST | Manage safety zones |
-| `/api/safety/config` | GET/POST | Safety configuration |
 | `/api/safety/hazards` | GET | Active hazard detection |
-
-### Observability API
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/observability/blackbox` | GET | Flight recorder data |
-| `/api/observability/fhe/audit` | GET | Encryption audit log |
-| `/api/observability/incident/{id}/analyze` | GET | Root cause analysis |
+| `/health` | GET | System health check |
 
 ---
 
-## Configuration
+## Role Coordination
 
-Edit `config/config.yaml`:
+Dynamical supports role-based skill execution for SwarmBridge integration:
 
-```yaml
-# System Settings
-system:
-  device_id: "orin_001"
-  simulation_mode: false
+| Role | Description |
+|------|-------------|
+| `independent` | Default - acts autonomously |
+| `leader` | Primary actor, initiates coordination |
+| `follower` | Follows leader commands/trajectory |
+| `observer` | Monitors but doesn't act |
+| `assistant` | Supports leader with secondary tasks |
 
-# TFLOPS Budget
-compute:
-  total_tflops: 137
-  safe_utilization: 0.85
+The role is passed via the unified skill invocation API and affects skill execution behavior.
 
-# Safety
-safety:
-  human_sensitivity: 0.8
-  stop_distance_m: 1.5
+---
 
-# Cloud
-cloud:
-  api_url: "https://api.dynamical.ai"
-  sync_interval_s: 600
-  encryption: "n2he_128"
+## Shared Crypto Library
 
-# Cameras
-cameras:
-  - id: "front"
-    rtsp_url: "rtsp://192.168.1.100:554/stream"
-  - id: "side"
-    rtsp_url: "rtsp://192.168.1.101:554/stream"
+The shared crypto library (`src/shared/crypto/`) provides a unified FHE interface:
+
+```python
+from src.shared.crypto import create_fhe_backend, FHEConfig, get_available_backends
+
+# Check available backends
+print(get_available_backends())  # ['tenseal', 'n2he', 'mock']
+
+# Create with custom config
+config = FHEConfig(
+    backend='auto',
+    poly_modulus_degree=8192,
+    security_bits=128
+)
+backend = create_fhe_backend(config=config)
+
+# Encrypt/decrypt
+encrypted = backend.encrypt(gradients)
+decrypted = backend.decrypt(encrypted)
+
+# Homomorphic operations
+summed = backend.homomorphic_sum([enc1, enc2, enc3])
 ```
 
 ---
 
-## Safety
+## UI Dashboard
 
-> [!IMPORTANT]
-> **SAFETY DISCLAIMER**: This software provides safety-adjacent features but is **NOT a certified safety controller**. Always use in conjunction with:
-> - Hardware emergency stops (E-stops)
-> - Physical barriers and guards
-> - Trained personnel supervision
-> - Standard industrial safety practices
+The React dashboard manages edge-specific functionality:
 
-### Safety Features
-- **KEEP_OUT Zones**: Robot stops immediately if it enters
-- **SLOW_DOWN Zones**: Robot reduces speed in area
-- **Human Detection**: Camera-based person detection
-- **Configurable Stop Distance**: 0.5m to 5.0m range
+| Component | Description |
+|-----------|-------------|
+| **Dashboard** | System status, TFLOPS usage, component health |
+| **Device Manager** | ONVIF cameras, DYGlove calibration, robot control |
+| **Skills Manager** | MoE routing, skill upload/download |
+| **Training Manager** | Datasets, training jobs, FL status |
+| **Observability** | Flight recorder, VLA status, FHE audit |
+| **Safety** | Interactive zone drawing, hazard configuration |
+
+> **Note**: Cross-site orchestration and multi-robot coordination UI are handled by SwarmBridge/SwarmBrain, not Dynamical.
 
 ---
 
@@ -312,11 +396,11 @@ cameras:
 
 ```bash
 # Run all tests
-python -m pytest
+python -m pytest tests/
 
 # Run specific test modules
-python -m pytest tests/test_skills.py
-python -m pytest tests/test_safety.py
+python -m pytest tests/test_config_loader.py
+python -m pytest tests/test_whole_body_gmr.py
 
 # Run with coverage
 python -m pytest --cov=src
@@ -324,39 +408,28 @@ python -m pytest --cov=src
 
 ---
 
-## Research
+## What Dynamical Does NOT Include
 
-This platform implements novel research in robotics AI:
+The following are handled by external services (SwarmBridge/SwarmBrain):
 
-**Skill-Centric Federated Learning for Vision-Language-Action Models**
-
-- Frozen base VLA models preserve vendor IP
-- Trainable skill experts enable customization
-- N2HE encryption ensures privacy during FL
-- MoE routing enables dynamic skill composition
-
-See: [Research Paper](docs/research/dynamical_moe_skills_paper.md)
+- Multi-robot coordination logic
+- Cross-site orchestration
+- OpenFL integration (uses Flower instead)
+- CSA registry (uses encrypted storage directly)
+- Central FL service (exposes API for external FL service)
 
 ---
 
-## Open Source Dependencies
+## Version History
 
-| Library | License | Purpose |
-|---------|---------|---------|
-| PyTorch | BSD | Deep learning |
-| FastAPI | MIT | REST API |
-| React | MIT | Dashboard UI |
-| OpenCV | Apache 2.0 | Computer vision |
-| MMPose | Apache 2.0 | Pose estimation |
-| Pinocchio | BSD | Robot kinematics |
-
----
-
-## Support
-
-- **Documentation**: [docs.dynamical.ai](https://docs.dynamical.ai)
-- **Email**: support@dynamical.ai
-- **Emergency**: emergency@dynamical.ai (safety issues)
+| Version | Date | Highlights |
+|---------|------|------------|
+| **0.4.0** | Dec 2024 | Unified Skill API, shared crypto library, role coordination |
+| 0.3.2 | Dec 2024 | User documentation, ONVIF PTZ, glove calibration |
+| 0.3.1 | Dec 2024 | Comprehensive UI (Skills, Training, Observability) |
+| 0.3.0 | Dec 2024 | MoE skill architecture, N2HE encryption |
+| 0.2.0 | Nov 2024 | Safety zones, federated learning |
+| 0.1.0 | Oct 2024 | Initial release |
 
 ---
 
@@ -366,12 +439,8 @@ Proprietary - Dynamical.ai © 2024
 
 ---
 
-## Version History
+## Support
 
-| Version | Date | Highlights |
-|---------|------|------------|
-| 0.3.2 | Dec 2024 | User documentation, ONVIF PTZ, glove calibration |
-| 0.3.1 | Dec 2024 | Comprehensive UI (Skills, Training, Observability) |
-| 0.3.0 | Dec 2024 | MoE skill architecture, N2HE encryption |
-| 0.2.0 | Nov 2024 | Safety zones, federated learning |
-| 0.1.0 | Oct 2024 | Initial release |
+- **Documentation**: [docs.dynamical.ai](https://docs.dynamical.ai)
+- **Email**: support@dynamical.ai
+- **Emergency**: emergency@dynamical.ai (safety issues)
