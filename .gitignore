@@ -3,6 +3,7 @@
 .env
 system.log
 *.log
+*.db
 
 # Python cache
 __pycache__/
@@ -28,3 +29,4 @@ models/*.pt
 # Temp files
 *.tmp
 .cache/
+*.zip
