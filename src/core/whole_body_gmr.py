@@ -246,7 +246,14 @@ class FallbackRetargeter:
             # Use real retargeter - convert GMR format to expected pose format
             try:
                 result = self._retargeter.retarget(human_motion)
-                return result.q
+                q_result = result.q
+                # Ensure output matches requested n_joints
+                if len(q_result) != self.n_joints:
+                    q = np.zeros(self.n_joints)
+                    n = min(len(q_result), self.n_joints)
+                    q[:n] = q_result[:n]
+                    return q
+                return q_result
             except Exception as e:
                 logger.warning(f"MotionRetargeter failed: {e}, using heuristic")
 

@@ -95,6 +95,19 @@ class InvocationMode(str, Enum):
     AUTONOMOUS = "autonomous"   # Robot decides based on observation
 
 
+class RobotRole(str, Enum):
+    """Robot role in multi-robot coordination scenarios.
+
+    Used by SwarmBridge/SwarmBrain for cross-site orchestration,
+    but the role is passed here for skill-level awareness.
+    """
+    LEADER = "leader"           # Primary actor, initiates coordination
+    FOLLOWER = "follower"       # Follows leader commands/trajectory
+    OBSERVER = "observer"       # Monitors but doesn't act
+    INDEPENDENT = "independent" # Acts autonomously (default)
+    ASSISTANT = "assistant"     # Supports leader with secondary tasks
+
+
 class ActionSpace(str, Enum):
     """Robot action space types."""
     JOINT_POSITION = "joint_position"       # Joint angles
@@ -209,7 +222,20 @@ class RobotAction:
 
 @dataclass
 class SkillInvocationRequest:
-    """Request to invoke a skill."""
+    """Request to invoke a skill.
+
+    This is the unified skill invocation interface used by the Dynamical Edge Platform.
+    It accepts inputs from both local control loops and external orchestration systems
+    (SwarmBridge/SwarmBrain) via the standardized API.
+    """
+    # Robot identification (required for multi-robot deployments)
+    robot_id: Optional[str] = None              # Unique robot identifier
+
+    # Role & Coordination (for SwarmBridge integration)
+    role: RobotRole = RobotRole.INDEPENDENT     # Robot's role in coordination
+    goal: Optional[str] = None                  # High-level goal description
+    coordination_id: Optional[str] = None       # Shared ID for coordinated tasks
+
     # Task specification (one of these should be provided)
     task_description: Optional[str] = None      # Natural language
     task_embedding: Optional[np.ndarray] = None # Pre-computed embedding

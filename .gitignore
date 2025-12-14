@@ -3,6 +3,7 @@
 .env
 system.log
 *.log
+*.db
 
 # Python cache
 __pycache__/

@@ -69,6 +69,36 @@ except ImportError:
 # =============================================================================
 
 @dataclass
+class CoordinationMetadata:
+    """Coordination metadata for multi-robot skill execution.
+
+    This metadata is fetched from the unified skill artifact registry
+    and used by SwarmBridge/SwarmBrain for cross-site orchestration.
+
+    The edge device uses this to understand how to execute skills
+    in a coordinated manner with other robots.
+    """
+    # Role requirements
+    supported_roles: List[str] = field(default_factory=lambda: ["independent"])
+    requires_leader: bool = False
+    max_followers: int = 0
+
+    # Synchronization
+    sync_mode: str = "none"  # none, loose, strict, realtime
+    sync_frequency_hz: float = 0.0
+
+    # Communication
+    broadcast_state: bool = False
+    receive_state: bool = False
+    state_channels: List[str] = field(default_factory=list)
+
+    # Constraints
+    min_robots: int = 1
+    max_robots: int = 1
+    requires_same_site: bool = True
+
+
+@dataclass
 class SkillInfo:
     """Local skill information."""
     id: str
@@ -83,6 +113,9 @@ class SkillInfo:
     last_used: Optional[str] = None
     execution_count: int = 0
     avg_execution_time_ms: float = 0.0
+
+    # Coordination metadata (for SwarmBridge integration)
+    coordination: Optional[CoordinationMetadata] = None
 
 
 @dataclass
@@ -572,6 +605,30 @@ class EdgeSkillClient:
 
         return results
 
+    def _parse_coordination_metadata(self, metadata: Dict) -> Optional[CoordinationMetadata]:
+        """Parse coordination metadata from skill artifact.
+
+        Coordination metadata is used by SwarmBridge/SwarmBrain for
+        cross-site orchestration of multi-robot skills.
+        """
+        coord_data = metadata.get("coordination", {})
+        if not coord_data:
+            return None
+
+        return CoordinationMetadata(
+            supported_roles=coord_data.get("supported_roles", ["independent"]),
+            requires_leader=coord_data.get("requires_leader", False),
+            max_followers=coord_data.get("max_followers", 0),
+            sync_mode=coord_data.get("sync_mode", "none"),
+            sync_frequency_hz=coord_data.get("sync_frequency_hz", 0.0),
+            broadcast_state=coord_data.get("broadcast_state", False),
+            receive_state=coord_data.get("receive_state", False),
+            state_channels=coord_data.get("state_channels", []),
+            min_robots=coord_data.get("min_robots", 1),
+            max_robots=coord_data.get("max_robots", 1),
+            requires_same_site=coord_data.get("requires_same_site", True),
+        )
+
     def _download_and_cache_skill(self, skill_data: Dict):
         """Download and cache a skill from cloud response."""
         metadata = skill_data.get("metadata", {})
@@ -594,7 +651,10 @@ class EdgeSkillClient:
             weights = self.decryptor.decrypt_weights(encrypted_weights)
             config = self.decryptor.decrypt_config(encrypted_config)
 
-            # Cache
+            # Parse coordination metadata from unified skill artifact
+            coordination = self._parse_coordination_metadata(metadata)
+
+            # Cache with coordination metadata
             self.cache.store(
                 skill_id=skill_id,
                 name=metadata.get("name", ""),
@@ -603,6 +663,7 @@ class EdgeSkillClient:
                 version=metadata.get("version", "1.0.0"),
                 weights=weights,
                 config=config,
+                coordination=coordination,
             )
 
             self.stats["downloads"] += 1

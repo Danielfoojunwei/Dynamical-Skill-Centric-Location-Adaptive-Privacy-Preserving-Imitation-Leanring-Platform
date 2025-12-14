@@ -55,8 +55,8 @@ def sample_pose_2d():
     kp[0, 12] = [700, 500, 0.85] # right hip
     kp[0, 13] = [570, 650, 0.8]  # left knee
     kp[0, 14] = [710, 650, 0.8]  # right knee
-    kp[0, 15] = [560, 800, 0.75] # left ankle
-    kp[0, 16] = [720, 800, 0.75] # right ankle
+    kp[0, 15] = [560, 700, 0.75] # left ankle (within image bounds)
+    kp[0, 16] = [720, 700, 0.75] # right ankle (within image bounds)
 
     bbox = np.array([[450, 150, 830, 850, 0.95]])
 
