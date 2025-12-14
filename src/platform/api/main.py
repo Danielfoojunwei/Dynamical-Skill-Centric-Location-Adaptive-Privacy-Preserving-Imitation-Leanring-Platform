@@ -937,7 +937,7 @@ async def glove_calibration_load(glove_id: str):
 
 from src.core.robot_skill_invoker import (
     RobotSkillInvoker, SkillInvocationRequest, ObservationState,
-    InvocationMode, ActionSpace, init_skill_invoker
+    InvocationMode, ActionSpace, RobotRole, init_skill_invoker
 )
 
 # Initialize skill invoker
@@ -949,10 +949,26 @@ robot_skill_invoker = init_skill_invoker(
 robot_skill_invoker.start()
 
 class SkillInvokeRequest(BaseModel):
+    """Unified skill invocation request.
+
+    Supports both simple skill execution and coordinated multi-robot scenarios.
+    For SwarmBridge/SwarmBrain integration, provide robot_id, role, and goal.
+    """
+    # Robot & Coordination (for SwarmBridge integration)
+    robot_id: Optional[str] = None              # Unique robot identifier
+    role: str = "independent"                   # leader, follower, observer, independent, assistant
+    goal: Optional[str] = None                  # High-level goal (e.g., "pick up the cup")
+    coordination_id: Optional[str] = None       # Shared ID for coordinated tasks
+
+    # Task specification
     task_description: Optional[str] = None
     skill_ids: Optional[List[str]] = None
+
+    # Observation state
     joint_positions: Optional[List[float]] = None
     ee_position: Optional[List[float]] = None
+
+    # Execution parameters
     mode: str = "autonomous"
     action_space: str = "joint_position"
     max_skills: int = 3
@@ -986,7 +1002,21 @@ async def invoke_skill(request: SkillInvokeRequest):
             "hybrid": ActionSpace.HYBRID,
         }
 
+        role_map = {
+            "leader": RobotRole.LEADER,
+            "follower": RobotRole.FOLLOWER,
+            "observer": RobotRole.OBSERVER,
+            "independent": RobotRole.INDEPENDENT,
+            "assistant": RobotRole.ASSISTANT,
+        }
+
         invocation_request = SkillInvocationRequest(
+            # Robot & Coordination
+            robot_id=request.robot_id,
+            role=role_map.get(request.role, RobotRole.INDEPENDENT),
+            goal=request.goal,
+            coordination_id=request.coordination_id,
+            # Task specification
             task_description=request.task_description,
             skill_ids=request.skill_ids,
             observation=observation,
@@ -1000,6 +1030,10 @@ async def invoke_skill(request: SkillInvokeRequest):
         return {
             "success": result.success,
             "request_id": result.request_id,
+            "robot_id": request.robot_id,
+            "role": request.role,
+            "goal": request.goal,
+            "coordination_id": request.coordination_id,
             "actions": [
                 {
                     "skill_id": a.skill_id,
@@ -1018,6 +1052,16 @@ async def invoke_skill(request: SkillInvokeRequest):
     except Exception as e:
         logger.error(f"Skill invocation error: {e}")
         return {"success": False, "error": str(e)}
+
+@app.post("/api/v1/robot/execute_skill", dependencies=[Depends(get_api_key)])
+async def execute_skill(request: SkillInvokeRequest):
+    """Execute skills on the robot (alias for invoke_skill).
+
+    This endpoint provides the same functionality as invoke_skill
+    with a more explicit name for the execute operation.
+    """
+    return await invoke_skill(request)
+
 
 @app.get("/api/v1/robot/invoker/stats", dependencies=[Depends(get_api_key)])
 async def get_invoker_stats():
