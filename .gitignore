@@ -29,3 +29,4 @@ models/*.pt
 # Temp files
 *.tmp
 .cache/
+*.zip
