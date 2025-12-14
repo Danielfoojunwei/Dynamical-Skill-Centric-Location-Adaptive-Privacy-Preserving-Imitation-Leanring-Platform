@@ -52,7 +52,7 @@ from src.platform.safety_manager import safety_manager, SafetyZone, SafetyConfig
 from src.platform.network_manager import network_manager
 from src.platform.observability.FHE_Auditor import FHEAuditor
 from src.platform.cloud.secure_aggregator import SecureAggregator
-from src.platform.cloud.ffm_client import FFMClient
+from src.platform.cloud.ffm_client import UnifiedModelClient
 from src.platform.observability.TraceManager import TraceManager
 from src.platform.cloud.vendor_adapter import VendorAdapter, Pi0VendorAdapter
 from src.drivers.daimon_vtla import DaimonVendorAdapter
@@ -67,7 +67,7 @@ fhe_auditor = FHEAuditor()
 # Note: Falls back to simulation internally if SDK is missing
 vendor_adapter = DaimonVendorAdapter()
 secure_aggregator = SecureAggregator()
-ffm_client = FFMClient(api_key=os.getenv("CLOUD_API_KEY", "simulated_key"))
+ffm_client = UnifiedModelClient()
 
 # Initialize MoE Skill Service (singleton)
 from src.platform.cloud.moe_skill_router import CloudSkillService, SkillRequest, SkillType

@@ -2,11 +2,18 @@ import logging
 import time
 import os
 import numpy as np
-import torch
 from typing import Dict, Any, Optional
 from src.platform.cloud.vendor_adapter import VendorAdapter
 
 from src.platform.logging_utils import get_logger
+
+# PyTorch is optional - only needed for gradient operations
+try:
+    import torch
+    HAS_TORCH = True
+except ImportError:
+    HAS_TORCH = False
+    torch = None
 
 logger = get_logger("daimon_driver")
 
@@ -144,16 +151,22 @@ class DaimonVTLAAdapter(VendorAdapter):
             logger.error(f"Inference error: {e}")
             return {"action": np.zeros(7), "confidence": 0.0}
 
-    def get_gradient_buffer(self) -> Optional[torch.Tensor]:
+    def get_gradient_buffer(self) -> Optional[Any]:
         """
         Retrieve gradients from the edge training step (MOAI).
+
+        Returns:
+            torch.Tensor if PyTorch available, numpy array otherwise, or None
         """
         if not self.simulation_mode:
             # TODO: return self.robot.get_latest_gradients()
             pass
-            
+
         if self._gradient_buffer is None:
-            self._gradient_buffer = torch.randn(1024, 1024)
+            if HAS_TORCH:
+                self._gradient_buffer = torch.randn(1024, 1024)
+            else:
+                self._gradient_buffer = np.random.randn(1024, 1024).astype(np.float32)
         return self._gradient_buffer
 
 # Alias for backward compatibility
