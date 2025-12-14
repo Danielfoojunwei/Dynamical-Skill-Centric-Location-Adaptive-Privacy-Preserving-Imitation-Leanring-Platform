@@ -6,7 +6,6 @@ Tests:
 - Configuration model validation
 - YAML file loading
 - Environment variable overrides
-- Meta AI configuration
 - TFLOPS allocation
 """
 
@@ -115,10 +114,16 @@ class TestConfigModels:
         alloc = TFLOPSAllocation()
 
         assert alloc.safety_detection == 15.0
-        assert alloc.navigation_detection == 30.0
+        assert alloc.spatial_brain == 3.0
+        assert alloc.navigation_detection == 40.0
         assert alloc.depth_estimation == 5.0
+        assert alloc.trajectory_prediction == 0.5
+        assert alloc.il_training == 9.0
+        assert alloc.moai_compression == 3.0
+        assert alloc.fhe_encryption == 1.0
         assert alloc.pi0_vla == 10.0
-        assert alloc.full_perception == 15.0
+        assert alloc.full_perception == 30.0
+        assert alloc.anomaly_detection == 3.0
 
     def test_tflops_budget_defaults(self):
         """Test TFLOPSBudget defaults."""
@@ -132,7 +137,7 @@ class TestConfigModels:
         assert budget.allocations is not None
 
     def test_tflops_budget_total_allocation(self):
-        """Test that TFLOPS allocations are reasonable."""
+        """Test that TFLOPS allocations sum correctly."""
         from src.core.config_loader import TFLOPSBudget, TFLOPSAllocation
 
         budget = TFLOPSBudget()
@@ -144,6 +149,7 @@ class TestConfigModels:
             alloc.spatial_brain +
             alloc.navigation_detection +
             alloc.depth_estimation +
+            alloc.trajectory_prediction +
             alloc.il_training +
             alloc.moai_compression +
             alloc.fhe_encryption +
@@ -152,8 +158,12 @@ class TestConfigModels:
             alloc.anomaly_detection
         )
 
-        # Total should be less than budget (leaving room for Meta AI)
-        assert total <= budget.total_fp16 * budget.safe_utilization
+        # Total should be 119.5 TFLOPS
+        assert total == 119.5
+
+        # This is 87.2% of total budget
+        utilization = total / budget.total_fp16
+        assert 0.85 < utilization < 0.90
 
     def test_pipeline_config(self):
         """Test PipelineConfig."""
@@ -381,11 +391,11 @@ system:
 
 
 # =============================================================================
-# Meta AI Config Tests (from config.yaml)
+# TFLOPS Config Tests (from config.yaml)
 # =============================================================================
 
-class TestMetaAIConfig:
-    """Test suite for Meta AI configuration in config.yaml."""
+class TestTFLOPSConfig:
+    """Test suite for TFLOPS configuration in config.yaml."""
 
     @pytest.fixture
     def config_yaml(self):
@@ -393,105 +403,60 @@ class TestMetaAIConfig:
         with open("config/config.yaml", 'r') as f:
             return yaml.safe_load(f)
 
-    def test_meta_ai_section_exists(self, config_yaml):
-        """Test meta_ai section exists in config."""
-        assert "meta_ai" in config_yaml
+    def test_tflops_budget_exists(self, config_yaml):
+        """Test tflops_budget section exists in config."""
+        assert "tflops_budget" in config_yaml
 
-    def test_dinov3_config(self, config_yaml):
-        """Test DINOv3 configuration."""
-        meta_ai = config_yaml["meta_ai"]
-        assert "dinov3" in meta_ai
+    def test_tflops_budget_values(self, config_yaml):
+        """Test TFLOPS budget values."""
+        budget = config_yaml["tflops_budget"]
 
-        dinov3 = meta_ai["dinov3"]
-        assert dinov3["enabled"] == True
-        assert dinov3["model_size"] == "vit_large"
-        assert dinov3["input_size"] == 518
-        assert dinov3["use_fp16"] == True
-        assert "cache_dir" in dinov3
+        assert budget["total_fp16"] == 137.0
+        assert budget["safe_utilization"] == 0.85
+        assert budget["burst_utilization"] == 0.95
 
-    def test_sam3_config(self, config_yaml):
-        """Test SAM3 configuration."""
-        meta_ai = config_yaml["meta_ai"]
-        assert "sam3" in meta_ai
+    def test_tflops_allocations_exist(self, config_yaml):
+        """Test allocations exist in TFLOPS budget."""
+        budget = config_yaml["tflops_budget"]
+        assert "allocations" in budget
 
-        sam3 = meta_ai["sam3"]
-        assert sam3["enabled"] == True
-        assert sam3["model_size"] == "sam3_large"
-        assert sam3["input_size"] == 1024
-        assert sam3["max_objects"] == 10
-        assert sam3["confidence_threshold"] == 0.5
-        assert sam3["enable_tracking"] == True
+        allocs = budget["allocations"]
+        expected_keys = [
+            "safety_detection", "spatial_brain", "navigation_detection",
+            "depth_estimation", "trajectory_prediction", "il_training",
+            "moai_compression", "fhe_encryption", "pi0_vla",
+            "full_perception", "anomaly_detection"
+        ]
 
-    def test_vjepa2_config(self, config_yaml):
-        """Test V-JEPA 2 configuration."""
-        meta_ai = config_yaml["meta_ai"]
-        assert "vjepa2" in meta_ai
+        for key in expected_keys:
+            assert key in allocs, f"Missing allocation: {key}"
 
-        vjepa2 = meta_ai["vjepa2"]
-        assert vjepa2["enabled"] == True
-        assert vjepa2["model_size"] == "vjepa2_large"
-        assert vjepa2["num_frames"] == 16
-        assert vjepa2["prediction_horizon"] == 16
-        assert vjepa2["enable_safety_prediction"] == True
-        assert vjepa2["collision_threshold"] == 0.7
-        assert vjepa2["emergency_stop_threshold"] == 0.9
+    def test_tflops_allocation_values(self, config_yaml):
+        """Test TFLOPS allocation values match expected."""
+        allocs = config_yaml["tflops_budget"]["allocations"]
 
-    def test_privacy_config(self, config_yaml):
-        """Test privacy (N2HE) configuration."""
-        meta_ai = config_yaml["meta_ai"]
-        assert "privacy" in meta_ai
-
-        privacy = meta_ai["privacy"]
-        assert privacy["enabled"] == True
-        assert privacy["security_bits"] == 128
-        assert privacy["lwe_dimension"] == 1024
-        assert privacy["enable_homomorphic_routing"] == True
-
-    def test_pipeline_timing_config(self, config_yaml):
-        """Test Meta AI pipeline timing configuration."""
-        meta_ai = config_yaml["meta_ai"]
-        assert "pipeline" in meta_ai
-
-        pipeline = meta_ai["pipeline"]
-        assert pipeline["fusion_method"] == "concat"
-        assert pipeline["safety_rate_hz"] == 1000.0
-        assert pipeline["control_rate_hz"] == 100.0
-        assert pipeline["learning_rate_hz"] == 10.0
-        assert pipeline["cloud_rate_hz"] == 0.1
-
-    def test_tflops_allocation_config(self, config_yaml):
-        """Test Meta AI TFLOPS allocation."""
-        meta_ai = config_yaml["meta_ai"]
-        assert "tflops_allocation" in meta_ai
-
-        tflops = meta_ai["tflops_allocation"]
-        assert tflops["dinov3"] == 8.0
-        assert tflops["sam3"] == 15.0
-        assert tflops["vjepa2"] == 10.0
-        assert tflops["total"] == 33.0
-
-    def test_tflops_allocation_sums_correctly(self, config_yaml):
-        """Test that Meta AI TFLOPS allocation sums correctly."""
-        tflops = config_yaml["meta_ai"]["tflops_allocation"]
-
-        model_sum = tflops["dinov3"] + tflops["sam3"] + tflops["vjepa2"]
-        assert model_sum == tflops["total"]
+        assert allocs["safety_detection"] == 15.0
+        assert allocs["spatial_brain"] == 3.0
+        assert allocs["navigation_detection"] == 40.0
+        assert allocs["depth_estimation"] == 5.0
+        assert allocs["trajectory_prediction"] == 0.5
+        assert allocs["il_training"] == 9.0
+        assert allocs["moai_compression"] == 3.0
+        assert allocs["fhe_encryption"] == 1.0
+        assert allocs["pi0_vla"] == 10.0
+        assert allocs["full_perception"] == 30.0
+        assert allocs["anomaly_detection"] == 3.0
 
     def test_total_tflops_within_budget(self, config_yaml):
         """Test total TFLOPS is within Jetson Orin budget."""
-        total_budget = config_yaml["tflops_budget"]["total_fp16"]
-        safe_utilization = config_yaml["tflops_budget"]["safe_utilization"]
-        meta_ai_total = config_yaml["meta_ai"]["tflops_allocation"]["total"]
+        budget = config_yaml["tflops_budget"]
+        allocs = budget["allocations"]
 
-        # Get legacy allocations
-        legacy_allocs = config_yaml["tflops_budget"]["allocations"]
-        legacy_total = sum(v for k, v in legacy_allocs.items() if isinstance(v, (int, float)))
+        total_used = sum(allocs.values())
+        max_budget = budget["total_fp16"]
 
-        total_used = legacy_total + meta_ai_total
-        max_safe = total_budget * safe_utilization
-
-        # Total usage should be within safe utilization limit
-        assert total_used <= max_safe, f"Total {total_used} exceeds safe limit {max_safe}"
+        # Total should be within 100% of budget
+        assert total_used <= max_budget, f"Total {total_used} exceeds budget {max_budget}"
 
 
 # =============================================================================

@@ -29,7 +29,7 @@ def test(name, condition, error_msg=""):
         FAIL_COUNT += 1
 
 
-def test_section(name):
+def print_section(name):
     print(f"\n{'='*60}\n{name}\n{'='*60}")
 
 
@@ -39,7 +39,7 @@ def test_section(name):
 
 def test_kinematics_error_handling():
     """Test kinematics module handles errors gracefully."""
-    test_section("KINEMATICS ERROR HANDLING")
+    print_section("KINEMATICS ERROR HANDLING")
 
     from src.core.retargeting import RobotKinematics, JointLimits
 
@@ -105,7 +105,7 @@ def test_kinematics_error_handling():
 
 def test_ik_solver_error_handling():
     """Test IK solver handles errors gracefully."""
-    test_section("IK SOLVER ERROR HANDLING")
+    print_section("IK SOLVER ERROR HANDLING")
 
     from src.core.retargeting import RobotKinematics, IKSolver, IKSolverConfig
 
@@ -157,7 +157,7 @@ def test_ik_solver_error_handling():
 
 def test_retargeting_error_handling():
     """Test motion retargeting handles errors gracefully."""
-    test_section("RETARGETING ERROR HANDLING")
+    print_section("RETARGETING ERROR HANDLING")
 
     from src.core.retargeting import MotionRetargeter
 
@@ -203,7 +203,7 @@ def test_retargeting_error_handling():
 
 def test_pose_inference_error_handling():
     """Test pose inference handles errors gracefully."""
-    test_section("POSE INFERENCE ERROR HANDLING")
+    print_section("POSE INFERENCE ERROR HANDLING")
 
     from src.core.pose_inference import RTMPoseRealInference, RTMPoseConfig
 
@@ -261,7 +261,7 @@ def test_pose_inference_error_handling():
 
 def test_depth_estimation_error_handling():
     """Test depth estimation handles errors gracefully."""
-    test_section("DEPTH ESTIMATION ERROR HANDLING")
+    print_section("DEPTH ESTIMATION ERROR HANDLING")
 
     from src.core.depth_estimation import DepthAnythingV3, DepthEstimationConfig
 
@@ -293,7 +293,7 @@ def test_depth_estimation_error_handling():
 
 def test_cloud_services_error_handling():
     """Test cloud services handle errors gracefully."""
-    test_section("CLOUD SERVICES ERROR HANDLING")
+    print_section("CLOUD SERVICES ERROR HANDLING")
 
     from src.platform.cloud.ffm_client_real import FFMClientReal, FFMClientConfig
 
@@ -321,7 +321,7 @@ def test_cloud_services_error_handling():
 
 def test_data_type_coercion():
     """Test that the pipeline handles various data types."""
-    test_section("DATA TYPE COERCION")
+    print_section("DATA TYPE COERCION")
 
     from src.core.retargeting import RobotKinematics
 
