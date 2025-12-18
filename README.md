@@ -4,9 +4,13 @@
 ![Status](https://img.shields.io/badge/status-Production-green)
 ![License](https://img.shields.io/badge/license-Proprietary-red)
 
-> **On-Device Runtime and Training Engine for Humanoid Robots**
+> **On-Device Runtime and Training Engine for Humanoid Robots with Meta AI Foundation Models**
 
-The Dynamical Edge Platform is a clean, on-device runtime and training engine that exposes standardized interfaces for skill execution and federated learning. It runs on NVIDIA Jetson AGX Orin 32GB and features a **Mixture-of-Experts (MoE) skill architecture** with **privacy-preserving federated learning**.
+The Dynamical Edge Platform is a clean, on-device runtime and training engine that exposes standardized interfaces for skill execution and federated learning. It runs on NVIDIA Jetson AGX Orin 32GB and features:
+
+- **Meta AI Foundation Models**: DINOv2/v3, SAM 2/3, V-JEPA 2 for state-of-the-art perception
+- **Mixture-of-Experts (MoE) Skill Architecture** with privacy-preserving federated learning
+- **NVIDIA Isaac Lab Integration** for sim-to-real transfer and robot simulation
 
 **Key Design Principle**: Dynamical handles single-robot skill execution and on-device training. Multi-robot coordination and cross-site orchestration are handled by **SwarmBridge** and **SwarmBrain** services, which communicate with Dynamical via standardized APIs.
 
@@ -80,6 +84,29 @@ The Dynamical Edge Platform is a clean, on-device runtime and training engine th
 ---
 
 ## Key Features
+
+### Meta AI Foundation Models
+
+State-of-the-art perception powered by Meta's latest foundation models:
+
+| Model | Purpose | Key Features |
+|-------|---------|--------------|
+| **DINOv2/v3** | Self-supervised vision | Dense feature extraction, zero-shot classification |
+| **SAM 2/3** | Segment Anything | Real-time object segmentation, video tracking |
+| **V-JEPA 2** | Video understanding | Temporal reasoning, action prediction |
+
+All models include privacy-preserving wrappers for federated learning:
+- Differential privacy for feature extraction
+- Secure aggregation for model updates
+- Audit logging for compliance
+
+### NVIDIA Isaac Lab Simulation
+
+Sim-to-real transfer with high-fidelity physics simulation:
+- Real-time robot visualization
+- Domain randomization for robust policies
+- Parallel environment training
+- Direct deployment to Jetson hardware
 
 ### Unified Skill Invocation API
 
@@ -204,6 +231,13 @@ curl -X POST http://localhost:8000/api/v1/robot/invoke_skill \
 │   │   ├── robot_skill_invoker.py       # Unified skill invocation
 │   │   ├── whole_body_gmr.py            # Motion retargeting
 │   │   └── wholebody_pose_pipeline.py   # Pose estimation
+│   │
+│   ├── meta_ai/                     # Meta AI Foundation Models
+│   │   ├── dinov3.py                    # DINOv2/v3 vision backbone
+│   │   ├── sam3.py                      # SAM 2/3 segmentation
+│   │   ├── vjepa2.py                    # V-JEPA 2 video understanding
+│   │   ├── unified_perception.py        # Unified perception pipeline
+│   │   └── privacy_wrapper.py           # DP & secure aggregation
 │   │
 │   ├── shared/                      # Shared libraries
 │   │   └── crypto/                      # FHE backends
@@ -424,7 +458,8 @@ The following are handled by external services (SwarmBridge/SwarmBrain):
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **0.4.0** | Dec 2024 | Unified Skill API, shared crypto library, role coordination |
+| **0.4.0** | Dec 2024 | Meta AI Foundation Models (DINOv3, SAM3, V-JEPA 2), Isaac Lab simulation, Unified Skill API with role coordination, shared crypto library |
+| 0.3.3 | Dec 2024 | Isaac Lab robot simulation integration |
 | 0.3.2 | Dec 2024 | User documentation, ONVIF PTZ, glove calibration |
 | 0.3.1 | Dec 2024 | Comprehensive UI (Skills, Training, Observability) |
 | 0.3.0 | Dec 2024 | MoE skill architecture, N2HE encryption |
