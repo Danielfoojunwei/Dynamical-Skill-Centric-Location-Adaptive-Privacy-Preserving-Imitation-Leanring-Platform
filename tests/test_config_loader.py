@@ -108,21 +108,22 @@ class TestConfigModels:
         assert config.yolo_path == "models/yolo"
 
     def test_tflops_allocation_defaults(self):
-        """Test TFLOPSAllocation default values."""
+        """Test TFLOPSAllocation default values (v0.4.0 with Meta AI)."""
         from src.core.config_loader import TFLOPSAllocation
 
         alloc = TFLOPSAllocation()
 
+        # Updated defaults for Meta AI integration
+        # trajectory_prediction removed - now handled by V-JEPA 2
         assert alloc.safety_detection == 15.0
         assert alloc.spatial_brain == 3.0
-        assert alloc.navigation_detection == 40.0
+        assert alloc.navigation_detection == 30.0  # Reduced: SAM3 handles segmentation
         assert alloc.depth_estimation == 5.0
-        assert alloc.trajectory_prediction == 0.5
         assert alloc.il_training == 9.0
         assert alloc.moai_compression == 3.0
         assert alloc.fhe_encryption == 1.0
         assert alloc.pi0_vla == 10.0
-        assert alloc.full_perception == 30.0
+        assert alloc.full_perception == 15.0  # Reduced: DINOv3 handles features
         assert alloc.anomaly_detection == 3.0
 
     def test_tflops_budget_defaults(self):
@@ -137,19 +138,18 @@ class TestConfigModels:
         assert budget.allocations is not None
 
     def test_tflops_budget_total_allocation(self):
-        """Test that TFLOPS allocations sum correctly."""
+        """Test that TFLOPS allocations sum correctly (v0.4.0 with Meta AI)."""
         from src.core.config_loader import TFLOPSBudget, TFLOPSAllocation
 
         budget = TFLOPSBudget()
         alloc = budget.allocations
 
-        # Calculate total allocation
+        # Calculate total allocation (trajectory_prediction removed - handled by V-JEPA 2)
         total = (
             alloc.safety_detection +
             alloc.spatial_brain +
             alloc.navigation_detection +
             alloc.depth_estimation +
-            alloc.trajectory_prediction +
             alloc.il_training +
             alloc.moai_compression +
             alloc.fhe_encryption +
@@ -158,12 +158,13 @@ class TestConfigModels:
             alloc.anomaly_detection
         )
 
-        # Total should be 119.5 TFLOPS
-        assert total == 119.5
+        # Total should be 94.0 TFLOPS (core allocations)
+        # Meta AI models (DINOv3, SAM3, V-JEPA 2) add ~33 TFLOPS
+        assert total == 94.0
 
-        # This is 87.2% of total budget
+        # Core utilization is 68.6% - leaves room for Meta AI models
         utilization = total / budget.total_fp16
-        assert 0.85 < utilization < 0.90
+        assert 0.65 < utilization < 0.75
 
     def test_pipeline_config(self):
         """Test PipelineConfig."""
@@ -421,9 +422,11 @@ class TestTFLOPSConfig:
         assert "allocations" in budget
 
         allocs = budget["allocations"]
+        # Updated for Meta AI integration (v0.4.0)
+        # trajectory_prediction removed - now handled by V-JEPA 2
         expected_keys = [
             "safety_detection", "spatial_brain", "navigation_detection",
-            "depth_estimation", "trajectory_prediction", "il_training",
+            "depth_estimation", "il_training",
             "moai_compression", "fhe_encryption", "pi0_vla",
             "full_perception", "anomaly_detection"
         ]
@@ -432,19 +435,19 @@ class TestTFLOPSConfig:
             assert key in allocs, f"Missing allocation: {key}"
 
     def test_tflops_allocation_values(self, config_yaml):
-        """Test TFLOPS allocation values match expected."""
+        """Test TFLOPS allocation values match expected (v0.4.0 with Meta AI)."""
         allocs = config_yaml["tflops_budget"]["allocations"]
 
+        # Updated values for Meta AI integration
         assert allocs["safety_detection"] == 15.0
         assert allocs["spatial_brain"] == 3.0
-        assert allocs["navigation_detection"] == 40.0
+        assert allocs["navigation_detection"] == 30.0  # Reduced: SAM3 handles segmentation
         assert allocs["depth_estimation"] == 5.0
-        assert allocs["trajectory_prediction"] == 0.5
         assert allocs["il_training"] == 9.0
         assert allocs["moai_compression"] == 3.0
         assert allocs["fhe_encryption"] == 1.0
         assert allocs["pi0_vla"] == 10.0
-        assert allocs["full_perception"] == 30.0
+        assert allocs["full_perception"] == 15.0  # Reduced: DINOv3 handles features
         assert allocs["anomaly_detection"] == 3.0
 
     def test_total_tflops_within_budget(self, config_yaml):
