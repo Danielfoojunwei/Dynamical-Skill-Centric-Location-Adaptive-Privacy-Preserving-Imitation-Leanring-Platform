@@ -37,6 +37,9 @@ try:
     HAS_TORCH = True
 except ImportError:
     HAS_TORCH = False
+    torch = None
+    nn = None
+    F = None
 
 try:
     from PIL import Image
@@ -256,8 +259,10 @@ class SAM3Segmenter:
             logger.error(f"Failed to load SAM3: {e}")
             return False
 
-    def _create_image_encoder(self) -> nn.Module:
+    def _create_image_encoder(self) -> Any:
         """Create SAM3 image encoder (ViT-based)."""
+        if not HAS_TORCH:
+            raise RuntimeError("PyTorch required for image encoder")
         class MockImageEncoder(nn.Module):
             def __init__(self, embed_dim: int = 256):
                 super().__init__()
@@ -278,8 +283,10 @@ class SAM3Segmenter:
 
         return MockImageEncoder(embed_dim)
 
-    def _create_text_encoder(self) -> nn.Module:
+    def _create_text_encoder(self) -> Any:
         """Create SAM3 text encoder (CLIP-based)."""
+        if not HAS_TORCH:
+            raise RuntimeError("PyTorch required for text encoder")
         class MockTextEncoder(nn.Module):
             def __init__(self, embed_dim: int = 256, vocab_size: int = 49408):
                 super().__init__()
@@ -310,8 +317,10 @@ class SAM3Segmenter:
 
         return MockTextEncoder(embed_dim)
 
-    def _create_mask_decoder(self) -> nn.Module:
+    def _create_mask_decoder(self) -> Any:
         """Create SAM3 mask decoder."""
+        if not HAS_TORCH:
+            raise RuntimeError("PyTorch required for mask decoder")
         class MockMaskDecoder(nn.Module):
             def __init__(self, embed_dim: int = 256):
                 super().__init__()
@@ -351,8 +360,10 @@ class SAM3Segmenter:
 
         return MockMaskDecoder(embed_dim)
 
-    def _create_tracker(self) -> nn.Module:
+    def _create_tracker(self) -> Any:
         """Create SAM3 video tracker."""
+        if not HAS_TORCH:
+            raise RuntimeError("PyTorch required for tracker")
         class MockTracker(nn.Module):
             def __init__(self, embed_dim: int = 256, memory_size: int = 10):
                 super().__init__()

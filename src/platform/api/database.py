@@ -1,34 +1,5 @@
-from sqlalchemy import create_engine, Column, Integer, String, Float, JSON
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
-import time
-
-SQLALCHEMY_DATABASE_URL = "sqlite:///./system.db"
-
-# Check same thread = False is needed for SQLite with FastAPI
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
-)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-Base = declarative_base()
-
-class Device(Base):
-    __tablename__ = "devices"
-
-    id = Column(String, primary_key=True, index=True)
-    type = Column(String)
-    status = Column(String)
-    last_seen = Column(Float)
-    config = Column(JSON, nullable=True)
-
-class SystemEvent(Base):
-    __tablename__ = "system_events"
-
-    id = Column(Integer, primary_key=True, index=True)
 from sqlalchemy import create_engine, Column, Integer, String, Float, JSON, Boolean
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import declarative_base, sessionmaker
 import time
 
 SQLALCHEMY_DATABASE_URL = "sqlite:///./system.db"
@@ -70,8 +41,8 @@ class SafetyZone(Base):
     __tablename__ = "safety_zones"
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, unique=True)
-    zone_type = Column(String) # "KEEP_OUT", "SLOW_DOWN"
-    coordinates_json = Column(String) # JSON list of [x, y] points
+    zone_type = Column(String)  # "KEEP_OUT", "SLOW_DOWN"
+    coordinates_json = Column(String)  # JSON list of [x, y] points
     is_active = Column(Boolean, default=True)
 
 class SafetyConfig(Base):
@@ -83,7 +54,7 @@ class SafetyConfig(Base):
 
 def init_db():
     Base.metadata.create_all(bind=engine)
-    
+
     # Seed default config if empty
     db = SessionLocal()
     if not db.query(SafetyConfig).first():

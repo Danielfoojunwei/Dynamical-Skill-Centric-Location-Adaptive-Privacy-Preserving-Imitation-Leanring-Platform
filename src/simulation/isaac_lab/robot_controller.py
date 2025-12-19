@@ -27,7 +27,7 @@ class ControlMode(Enum):
 class ControllerConfig:
     """Configuration for robot controller."""
     control_mode: ControlMode = ControlMode.POSITION
-    control_frequency: float = 100.0  # Hz
+    control_frequency: float = 2.0  # Hz (500ms cycle for deliberate manipulation)
 
     # Position control gains
     position_kp: float = 100.0

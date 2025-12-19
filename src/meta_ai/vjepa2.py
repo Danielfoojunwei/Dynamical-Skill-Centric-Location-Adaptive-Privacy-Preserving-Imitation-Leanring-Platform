@@ -43,6 +43,9 @@ try:
     HAS_TORCH = True
 except ImportError:
     HAS_TORCH = False
+    torch = None
+    nn = None
+    F = None
 
 try:
     from PIL import Image
@@ -139,15 +142,15 @@ class WorldModelPrediction:
     # Predicted future embeddings
     future_embeddings: np.ndarray   # [T, embed_dim]
 
+    # Confidence (required)
+    prediction_confidence: np.ndarray  # [T]
+
     # Predicted actions (if action mode)
     predicted_actions: Optional[np.ndarray] = None  # [T, action_dim]
 
     # Safety predictions
     collision_probabilities: Optional[np.ndarray] = None  # [T]
     hazard_masks: Optional[np.ndarray] = None  # [T, H, W]
-
-    # Confidence
-    prediction_confidence: np.ndarray  # [T]
 
     # Timing
     inference_time_ms: float = 0.0
@@ -304,8 +307,10 @@ class VJEPA2WorldModel:
             logger.error(f"Failed to load V-JEPA 2: {e}")
             return False
 
-    def _create_encoder(self) -> nn.Module:
+    def _create_encoder(self) -> Any:
         """Create V-JEPA 2 video encoder."""
+        if not HAS_TORCH:
+            raise RuntimeError("PyTorch required for encoder")
         class MockVJEPA2Encoder(nn.Module):
             def __init__(self, embed_dim: int, num_frames: int):
                 super().__init__()
@@ -365,8 +370,10 @@ class VJEPA2WorldModel:
 
         return MockVJEPA2Encoder(self.config.embed_dim, self.config.num_frames)
 
-    def _create_predictor(self) -> nn.Module:
+    def _create_predictor(self) -> Any:
         """Create V-JEPA 2 predictor for future embeddings."""
+        if not HAS_TORCH:
+            raise RuntimeError("PyTorch required for predictor")
         class MockVJEPA2Predictor(nn.Module):
             def __init__(self, embed_dim: int, horizon: int):
                 super().__init__()
@@ -416,8 +423,10 @@ class VJEPA2WorldModel:
 
         return MockVJEPA2Predictor(self.config.embed_dim, self.config.prediction_horizon)
 
-    def _create_action_decoder(self) -> nn.Module:
+    def _create_action_decoder(self) -> Any:
         """Create action decoder for robot control."""
+        if not HAS_TORCH:
+            raise RuntimeError("PyTorch required for action decoder")
         class MockActionDecoder(nn.Module):
             def __init__(self, embed_dim: int, action_dim: int, horizon: int):
                 super().__init__()
@@ -476,8 +485,10 @@ class VJEPA2WorldModel:
             self.config.prediction_horizon
         )
 
-    def _create_safety_head(self) -> nn.Module:
+    def _create_safety_head(self) -> Any:
         """Create safety/collision prediction head."""
+        if not HAS_TORCH:
+            raise RuntimeError("PyTorch required for safety head")
         class MockSafetyHead(nn.Module):
             def __init__(self, embed_dim: int, horizon: int):
                 super().__init__()

@@ -39,6 +39,9 @@ try:
     HAS_TORCH = True
 except ImportError:
     HAS_TORCH = False
+    torch = None
+    nn = None
+    F = None
     logger.warning("PyTorch not available - using mock DINOv3")
 
 try:
@@ -240,8 +243,10 @@ class DINOv3Encoder:
             logger.error(f"Failed to load DINOv3: {e}")
             return False
 
-    def _create_mock_model(self) -> nn.Module:
+    def _create_mock_model(self) -> Any:
         """Create a mock DINOv3 model for testing."""
+        if not HAS_TORCH:
+            raise RuntimeError("PyTorch required for mock model")
         class MockDINOv3(nn.Module):
             def __init__(self, output_dim: int):
                 super().__init__()
@@ -270,7 +275,7 @@ class DINOv3Encoder:
 
         return MockDINOv3(self.config.output_dim)
 
-    def _load_local_weights(self, path: str) -> nn.Module:
+    def _load_local_weights(self, path: str) -> Any:
         """Load model from local weights file."""
         # Create base model architecture
         model = self._create_mock_model()
