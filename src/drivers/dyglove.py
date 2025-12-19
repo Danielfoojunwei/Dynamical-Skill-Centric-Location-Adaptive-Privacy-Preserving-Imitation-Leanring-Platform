@@ -1,10 +1,15 @@
 """
 DYGlove Integration Module for Dynamical.ai Edge Pipeline
 
-Replaces DextaGlove with the Dynamical DYGlove - a proprietary wireless
+Replaces DextaGlove with the Dynamical DYGlove - a proprietary wired
 haptic force feedback glove with 21-DOF motion capture.
 
-Reference: Internal Specs, "DYGlove: Wireless Haptic Glove with WiFi 6E"
+IMPORTANT: All DYGlove connections are now WIRED for reliability:
+- Primary: USB 3.2 Gen 2 (10Gbps) for <1ms latency
+- Secondary: Ethernet over USB-C for industrial deployments
+- NO WiFi: Eliminated for deterministic timing and reliability
+
+Reference: Internal Specs, "DYGlove: Wired Haptic Glove with USB/Ethernet"
 https://dynamical.ai/hardware/dyglove
 
 DYGlove Joint Configuration (21 DOF total):
@@ -197,7 +202,7 @@ class DYGloveQuality:
             joint_in_range=np.ones(21, dtype=bool),
             velocity_smoothness=1.0,
             force_feedback_active=True,
-            communication_latency_ms=2.0 # WiFi 6E target < 2ms
+            communication_latency_ms=0.5  # USB 3.2 target < 1ms (wired connection)
         )
 
 
@@ -423,31 +428,39 @@ class DYGloveDriverBase(ABC):
 
 class DYGloveDriver(DYGloveDriverBase):
     """
-    Real hardware driver for DYGlove (Wireless WiFi 6E).
-    
+    Real hardware driver for DYGlove (Wired USB/Ethernet).
+
+    Connection Methods (in order of preference):
+    1. USB 3.2 Gen 2: Direct USB connection via /dev/ttyUSB* or /dev/ttyACM*
+    2. Ethernet over USB-C: For industrial deployments with deterministic timing
+
+    NO WiFi support - removed for reliability and deterministic timing.
     Uses the DYGloveSDKClient for communication.
     """
-    
+
     def __init__(
         self,
-        ip: str = '192.168.1.100',
-        port: int = 8888,
+        port: str = '/dev/ttyUSB0',
         side: str = 'right',
         simulation_mode: bool = False,
+        baudrate: int = 921600,
+        timeout_ms: float = 10.0,
     ):
         """
-        Initialize DYGlove driver.
-        
+        Initialize DYGlove driver with wired connection.
+
         Args:
-            ip: IP address of the glove (if using WiFi/UDP)
-            port: UDP port
+            port: USB serial port (e.g., /dev/ttyUSB0, /dev/ttyACM0)
             side: 'left' or 'right' hand
             simulation_mode: If True, uses simulated data
+            baudrate: Serial baudrate (default 921600 for USB 3.2)
+            timeout_ms: Read timeout in milliseconds
         """
-        self.ip = ip
         self.port = port
         self.side = side
         self.simulation_mode = simulation_mode
+        self.baudrate = baudrate
+        self.timeout_ms = timeout_ms
         
         # Use the SDK Client
         from src.platform.edge.dyglove_sdk import DYGloveSDKClient
@@ -565,19 +578,29 @@ class DYGloveDriver(DYGloveDriverBase):
 
 
 
-class DYGloveWiFiDriver(DYGloveDriverBase):
+class DYGloveEthernetDriver(DYGloveDriverBase):
     """
-    WiFi driver for Wireless DYGlove.
-    
+    Wired Ethernet driver for DYGlove (industrial deployment).
+
+    Uses Ethernet over USB-C for deterministic timing in factory environments.
+    Provides hardware-level timestamps via PTP (IEEE 1588) when available.
+
     Protocol:
     - UDP (Port 9876): High-frequency state streaming (Glove -> Host)
     - TCP (Port 9877): Reliable control/config (Host <-> Glove)
     """
-    
+
     UDP_PORT = 9876
     TCP_PORT = 9877
-    
+
     def __init__(self, ip_address: str, side: str = 'right'):
+        """
+        Initialize wired Ethernet driver.
+
+        Args:
+            ip_address: IP address of the glove (e.g., 192.168.100.10)
+            side: 'left' or 'right' hand
+        """
         self.ip_address = ip_address
         self.side = side
         
@@ -599,9 +622,9 @@ class DYGloveWiFiDriver(DYGloveDriverBase):
         return self._connected
         
     def connect(self) -> bool:
-        """Connect to DOGlove via WiFi."""
+        """Connect to DYGlove via wired Ethernet."""
         try:
-            print(f"Connecting to Wireless DOGlove at {self.ip_address}...")
+            print(f"Connecting to DYGlove at {self.ip_address} via Ethernet...")
             
             # 1. Setup UDP Listener
             self._udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -640,11 +663,11 @@ class DYGloveWiFiDriver(DYGloveDriverBase):
             self._listen_thread.start()
             
             self._connected = True
-            print(f"Connected to Wireless DOGlove ({self.side})")
+            print(f"Connected to DYGlove ({self.side}) via Ethernet")
             return True
             
         except Exception as e:
-            print(f"Failed to connect to Wireless DOGlove: {e}")
+            print(f"Failed to connect to DYGlove via Ethernet: {e}")
             self.disconnect()
             return False
             
