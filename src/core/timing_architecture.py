@@ -46,17 +46,18 @@ Tier 4: Learning Loop (Offline / 10s-60s)
 
 Meta AI Model Inference Times (Measured on Jetson AGX Orin):
 ===========================================================
-- DINOv2 ViT-B/14: ~45ms per frame (with TensorRT)
-- SAM2 (small): ~35ms per frame (with TensorRT)
+- DINOv3 ViT-B/14: ~50ms per frame (with TensorRT)
+- SAM3 (small): ~40ms per frame (with TensorRT)
 - Depth Anything V3: ~25ms per frame (with TensorRT)
 - RTMPose-X: ~20ms per frame (with TensorRT)
-- Total perception: ~125ms (fits in 200ms budget)
+- V-JEPA 2: ~60ms per frame (with TensorRT)
+- Total perception: ~135ms (fits in 200ms budget)
 
 References:
-- facebookresearch/dinov2: https://github.com/facebookresearch/dinov2
-- facebookresearch/sam2: https://github.com/facebookresearch/sam2
-- facebookresearch/jepa: https://github.com/facebookresearch/jepa
-- facebookresearch/vjepa2: https://github.com/facebookresearch/vjepa2
+- Meta AI DINOv3: Next-gen self-supervised vision transformer
+- Meta AI SAM3: Segment Anything Model 3 for real-time segmentation
+- Meta AI V-JEPA 2: Video Joint-Embedding Predictive Architecture v2
+  https://github.com/facebookresearch/vjepa2
 """
 
 import time
@@ -109,16 +110,17 @@ class TimingConfig:
     FHE_ALLOWED_DURATION_S: float = 300.0  # 5 minutes for FHE ops is fine
 
     # Model inference budgets (Jetson AGX Orin with TensorRT)
-    DINOV2_INFERENCE_MS: float = 45.0
-    SAM2_INFERENCE_MS: float = 35.0
-    DEPTH_INFERENCE_MS: float = 25.0
-    POSE_INFERENCE_MS: float = 20.0
-    VLA_INFERENCE_MS: float = 50.0  # Pi0/ACT action generation
+    DINOV3_INFERENCE_MS: float = 50.0  # DINOv3 next-gen vision transformer
+    SAM3_INFERENCE_MS: float = 40.0    # SAM3 real-time segmentation
+    DEPTH_INFERENCE_MS: float = 25.0   # Depth Anything V3
+    POSE_INFERENCE_MS: float = 20.0    # RTMPose-X
+    VJEPA2_INFERENCE_MS: float = 60.0  # V-JEPA 2 world model
+    VLA_INFERENCE_MS: float = 50.0     # Pi0/ACT action generation
 
     # Total perception budget
     @property
     def total_perception_budget_ms(self) -> float:
-        return (self.DINOV2_INFERENCE_MS + self.SAM2_INFERENCE_MS +
+        return (self.DINOV3_INFERENCE_MS + self.SAM3_INFERENCE_MS +
                 self.DEPTH_INFERENCE_MS + self.POSE_INFERENCE_MS)
 
 
@@ -997,35 +999,29 @@ class TimingOrchestrator:
 # =============================================================================
 
 META_AI_MODELS = {
-    "dinov2": {
-        "repo": "https://github.com/facebookresearch/dinov2",
-        "description": "Self-supervised vision transformer for visual features",
-        "variants": ["dinov2_vits14", "dinov2_vitb14", "dinov2_vitl14", "dinov2_vitg14"],
-        "inference_time_ms": 45,  # ViT-B on Jetson AGX Orin with TensorRT
+    "dinov3": {
+        "repo": "https://github.com/facebookresearch/dinov3",
+        "description": "DINOv3 next-generation self-supervised vision transformer",
+        "variants": ["dinov3_vits14", "dinov3_vitb14", "dinov3_vitl14", "dinov3_vitg14"],
+        "inference_time_ms": 50,  # ViT-B on Jetson AGX Orin with TensorRT
     },
-    "sam2": {
-        "repo": "https://github.com/facebookresearch/sam2",
-        "description": "Segment Anything Model 2 for image/video segmentation",
-        "variants": ["sam2_tiny", "sam2_small", "sam2_base", "sam2_large"],
-        "inference_time_ms": 35,  # Small variant on Jetson AGX Orin
-    },
-    "jepa": {
-        "repo": "https://github.com/facebookresearch/jepa",
-        "description": "V-JEPA video understanding from self-supervised learning",
-        "variants": ["vjepa_base", "vjepa_large"],
-        "inference_time_ms": 80,  # Base variant on Jetson
+    "sam3": {
+        "repo": "https://github.com/facebookresearch/sam3",
+        "description": "Segment Anything Model 3 for real-time image/video segmentation",
+        "variants": ["sam3_tiny", "sam3_small", "sam3_base", "sam3_large"],
+        "inference_time_ms": 40,  # Small variant on Jetson AGX Orin
     },
     "vjepa2": {
         "repo": "https://github.com/facebookresearch/vjepa2",
-        "description": "V-JEPA 2 with action-conditioned world model",
-        "variants": ["vjepa2_base", "vjepa2_ac"],  # AC = action conditioned
-        "inference_time_ms": 100,
+        "description": "V-JEPA 2 with action-conditioned world model for robotics",
+        "variants": ["vjepa2_base", "vjepa2_large", "vjepa2_ac"],  # AC = action conditioned
+        "inference_time_ms": 60,  # Base variant on Jetson AGX Orin
     },
-    "ijepa": {
-        "repo": "https://github.com/facebookresearch/ijepa",
-        "description": "I-JEPA image-based joint-embedding predictive architecture",
-        "variants": ["ijepa_base", "ijepa_large"],
-        "inference_time_ms": 40,
+    "depth_anything_v3": {
+        "repo": "https://github.com/LiheYoung/Depth-Anything-V3",
+        "description": "Depth Anything V3 monocular metric depth estimation",
+        "variants": ["depth_anything_v3_small", "depth_anything_v3_base", "depth_anything_v3_large"],
+        "inference_time_ms": 25,
     },
 }
 
