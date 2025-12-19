@@ -38,6 +38,64 @@ from enum import Enum
 
 logger = logging.getLogger(__name__)
 
+# =============================================================================
+# Import MOAI and N2HE Components
+# =============================================================================
+
+# Import N2HE (Neural Network Homomorphic Encryption)
+try:
+    from src.moai.n2he import (
+        N2HEContext,
+        N2HEParams,
+        N2HE_128,
+        LWECiphertext,
+        Ciphertext as N2HECiphertext,
+        Encryptor as N2HEEncryptor,
+        Decryptor as N2HEDecryptor,
+        Evaluator as N2HEEvaluator,
+    )
+    HAS_N2HE = True
+except ImportError:
+    HAS_N2HE = False
+    N2HEContext = None
+    logger.warning("N2HE not available - using mock FHE")
+
+# Import MOAI FHE System
+try:
+    from src.moai.moai_fhe import (
+        MoaiFHEContext,
+        MoaiFHEConfig,
+        MoaiFHESystem,
+    )
+    HAS_MOAI_FHE = True
+except ImportError:
+    HAS_MOAI_FHE = False
+    MoaiFHEContext = None
+    logger.warning("MOAI FHE not available")
+
+# Import MOAI PyTorch (for neural compression)
+try:
+    from src.moai.moai_pt import MoaiConfig, HAS_TORCH
+    if HAS_TORCH:
+        from src.moai.moai_pt import MoaiTransformerBlockPT
+    HAS_MOAI_PT = HAS_TORCH
+except ImportError:
+    HAS_MOAI_PT = False
+    MoaiConfig = None
+
+# Import unified FHE backend
+try:
+    from src.shared.crypto.fhe_backend import (
+        create_fhe_backend,
+        FHEConfig,
+        FHEBackend,
+        get_available_backends,
+    )
+    HAS_FHE_BACKEND = True
+except ImportError:
+    HAS_FHE_BACKEND = False
+    create_fhe_backend = None
+
 
 # =============================================================================
 # Data Classes for Type Safety
