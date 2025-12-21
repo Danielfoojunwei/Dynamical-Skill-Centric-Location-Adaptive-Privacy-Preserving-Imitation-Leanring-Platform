@@ -66,9 +66,10 @@ tflops_budget:
     physics_prediction: 60.0            # Physics-informed prediction
     object_dynamics: 40.0               # Object motion prediction
 
-    # Tier 3 - On-Device LLM (NEW - enabled by FP4!)
-    llama_8b_quantized: 250.0           # Llama 3.1 8B INT4 for reasoning
-    skill_planner: 50.0                 # Natural language skill planning
+    # Tier 2 - Enhanced Safety Redundancy (reallocated from LLM)
+    safety_backup_model: 100.0          # Redundant safety model
+    tactile_prediction: 50.0            # Tactile sensor prediction
+    human_intent_prediction: 100.0      # Predict human movement for HRI safety
 
     # Tier 3 - Learning (10Hz)
     il_training_accelerated: 100.0      # Faster IL with FP4 forward pass
@@ -216,24 +217,6 @@ meta_ai:
     cache_dir: "/var/lib/dynamical/models/vjepa2"
 
   # ==========================================================================
-  # On-Device LLM (NEW - enabled by FP4 quantization!)
-  # ==========================================================================
-  llm:
-    enabled: true
-    model: "llama-3.1-8b"              # Llama 3.1 8B
-    precision: "int4"                  # INT4 GPTQ/AWQ quantization
-    max_context_length: 4096
-    max_new_tokens: 256
-    use_flash_attention: true
-    use_kv_cache: true
-    cache_dir: "/var/lib/dynamical/models/llama"
-    # Use cases:
-    #   - Natural language skill planning
-    #   - Error explanation and recovery
-    #   - Human-robot dialogue
-    #   - Task decomposition
-
-  # ==========================================================================
   # Privacy settings (N2HE encryption)
   # ==========================================================================
   privacy:
@@ -261,6 +244,6 @@ meta_ai:
     dinov3_giant: 120.0                # ViT-G FP4 (was 8.0 FP16 ViT-L)
     sam3_huge: 200.0                   # SAM3 Huge FP4 (was 15.0 FP16 Large)
     vjepa2_giant: 330.0                # V-JEPA 2 Giant FP4 (was 10.0 FP16 Large)
-    llama_8b: 250.0                    # Llama 3.1 8B INT4 (NEW!)
-    # Total Meta AI: 900.0 TFLOPS (43% of FP4 budget)
-    total: 900.0
+    # Total Meta AI: 650.0 TFLOPS (31% of FP4 budget)
+    # Remaining 250 TFLOPS reallocated to safety redundancy
+    total: 650.0

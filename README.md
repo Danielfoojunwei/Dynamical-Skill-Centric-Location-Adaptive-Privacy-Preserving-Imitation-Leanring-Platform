@@ -12,7 +12,7 @@ The Dynamical Edge Platform is an on-device runtime and training engine for huma
 - **128 GB LPDDR5X** - All models loaded simultaneously
 - **200Hz Control Loop** - 2x faster with FP4 quantization
 - **Giant Model Support** - DINOv3 ViT-G, SAM3 Huge, V-JEPA 2 Giant
-- **On-Device LLM** - Llama 3.1 8B INT4 for reasoning and planning
+- **Redundant Safety** - Multi-model ensemble with human intent prediction
 
 ### Key Features
 - **Meta AI Foundation Models**: DINOv3, SAM3, V-JEPA 2 for state-of-the-art perception
@@ -100,9 +100,8 @@ State-of-the-art perception powered by Meta's latest foundation models with FP4 
 | **DINOv3** | ViT-Giant | Dense features, zero-shot classification | 120.0 | 8.0 |
 | **SAM3** | Huge | Real-time segmentation, video tracking | 200.0 | 15.0 |
 | **V-JEPA 2** | Giant | World model, collision prediction | 330.0 | 10.0 |
-| **Llama 3.1** | 8B INT4 | On-device reasoning, skill planning | 250.0 | N/A |
 
-**Meta AI Total: 900.0 FP4 TFLOPS (43% of compute budget)**
+**Meta AI Total: 650.0 FP4 TFLOPS (31% of compute budget)**
 
 All models include privacy-preserving wrappers for federated learning:
 - Differential privacy for feature extraction
@@ -170,10 +169,10 @@ class CoordinationMetadata:
 ```
 
 ### 4-Tier Timing Architecture (Jetson Thor + FP4)
-- **Tier 1**: Safety Loop @ 1kHz (V-JEPA 2 Giant collision prediction, never throttled)
+- **Tier 1**: Safety Loop @ 1kHz (V-JEPA 2 Giant + backup model, never throttled)
 - **Tier 2**: Control/Perception @ 200Hz (5ms - UPGRADED with FP4 quantization!)
 - **Tier 3**: Learning Loop @ 10Hz (IL training, skill distillation)
-- **Tier 4**: Background (LLM reasoning, anomaly detection, FL aggregation)
+- **Tier 4**: Background (anomaly detection, FL aggregation)
 
 ### Compute Budget by Precision
 
@@ -209,9 +208,10 @@ With TensorRT FP4 quantization, we unlock **15x more compute** for inference:
 | **Physics Prediction** | 60.0 | 2 | 100Hz | NEW |
 | **Object Dynamics** | 40.0 | 2 | 100Hz | NEW |
 | *World Model Subtotal* | *280.0* | | | |
-| **Llama 3.1 8B (INT4)** | 250.0 | 3 | On-demand | NEW: On-device LLM! |
-| **Skill Planner** | 50.0 | 3 | 10Hz | NEW |
-| *LLM Subtotal* | *300.0* | | | |
+| **Safety Backup Model** | 100.0 | 1 | 1kHz | NEW: Redundant safety |
+| **Tactile Prediction** | 50.0 | 2 | 200Hz | NEW: Force sensing |
+| **Human Intent Prediction** | 100.0 | 2 | 100Hz | NEW: HRI safety |
+| *Safety Redundancy Subtotal* | *250.0* | | | |
 | **IL Training Accelerated** | 100.0 | 3 | 10Hz | 11x |
 | **MOAI Compression** | 30.0 | 3 | 10Hz | 10x |
 | **Skill Distillation** | 40.0 | 3 | 10Hz | NEW |
@@ -235,7 +235,7 @@ Used for gradient computation requiring higher precision:
 | **Reserve** | 17.0 | Training spikes |
 | **TOTAL** | **137.0** | **100% FP16 for training** |
 
-> **Key Insight**: FP4 quantization enables running GIANT model variants at 2x frequency (200Hz vs 100Hz) while adding entirely new capabilities like on-device LLM reasoning.
+> **Key Insight**: FP4 quantization enables running GIANT model variants at 2x frequency (200Hz vs 100Hz) with 250 TFLOPS dedicated to redundant safety systems for human-robot interaction.
 
 ### Privacy-Preserving Learning
 - **TenSEAL/N2HE**: 128-bit homomorphic encryption for gradients
