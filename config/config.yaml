@@ -64,6 +64,43 @@ retargeting:
     fallback_to_previous: true
 
 # =============================================================================
+# Glove Input Configuration
+# =============================================================================
+glove:
+  # Glove type selection: auto, dyglove, manus, simulator
+  type: "auto"                             # auto-detects available hardware
+
+  # Hand configuration
+  hands:
+    left_enabled: true
+    right_enabled: true
+
+  # Update rate (Hz)
+  update_rate: 120.0
+
+  # DYGlove-specific settings (WiFi 6E connection)
+  dyglove:
+    wifi_ip: "192.168.4.1"
+    wifi_port: 8080
+    battery_low_threshold: 20
+    enable_haptics: true
+    haptic_intensity: 0.7
+
+  # MANUS Glove-specific settings
+  manus:
+    sdk_library_path: "/usr/local/lib/libManusSdk.so"
+    enable_haptics: true
+    haptic_intensity: 0.7
+    # Profile: default, precision, gaming
+    profile: "precision"
+
+  # Simulator settings (for testing without hardware)
+  simulator:
+    noise_level: 0.01
+    simulate_latency: false
+    latency_ms: 5.0
+
+# =============================================================================
 # Meta AI Models Configuration
 # =============================================================================
 meta_ai:
