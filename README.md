@@ -8,10 +8,11 @@
 
 The Dynamical Edge Platform is an on-device runtime and training engine for humanoid robots. It runs on **NVIDIA Jetson Thor** (Blackwell architecture) with:
 
-- **2070 FP4 TFLOPS** - 7.5x more compute than previous generation
+- **2070 FP4 TFLOPS** - Full utilization via INT4/FP4 quantization
 - **128 GB LPDDR5X** - All models loaded simultaneously
-- **10Hz Control Loop** - 5x faster than previous generation
-- **Giant Model Support** - DINOv3 ViT-G, SAM3 Large, V-JEPA 2 Giant
+- **200Hz Control Loop** - 2x faster with FP4 quantization
+- **Giant Model Support** - DINOv3 ViT-G, SAM3 Huge, V-JEPA 2 Giant
+- **Redundant Safety** - Multi-model ensemble with human intent prediction
 
 ### Key Features
 - **Meta AI Foundation Models**: DINOv3, SAM3, V-JEPA 2 for state-of-the-art perception
@@ -92,13 +93,15 @@ The Dynamical Edge Platform is an on-device runtime and training engine for huma
 
 ### Meta AI Foundation Models
 
-State-of-the-art perception powered by Meta's latest foundation models:
+State-of-the-art perception powered by Meta's latest foundation models with FP4 quantization:
 
-| Model | Purpose | Key Features |
-|-------|---------|--------------|
-| **DINOv2/v3** | Self-supervised vision | Dense feature extraction, zero-shot classification |
-| **SAM 2/3** | Segment Anything | Real-time object segmentation, video tracking |
-| **V-JEPA 2** | Video understanding | Temporal reasoning, action prediction |
+| Model | Variant | Purpose | FP4 TFLOPS | FP16 TFLOPS |
+|-------|---------|---------|------------|-------------|
+| **DINOv3** | ViT-Giant | Dense features, zero-shot classification | 120.0 | 8.0 |
+| **SAM3** | Huge | Real-time segmentation, video tracking | 200.0 | 15.0 |
+| **V-JEPA 2** | Giant | World model, collision prediction | 330.0 | 10.0 |
+
+**Meta AI Total: 650.0 FP4 TFLOPS (31% of compute budget)**
 
 All models include privacy-preserving wrappers for federated learning:
 - Differential privacy for feature extraction
@@ -165,11 +168,101 @@ class CoordinationMetadata:
     max_robots: int
 ```
 
-### 4-Tier Timing Architecture (Jetson Thor)
-- **Tier 1**: Safety Loop @ 1kHz (hardware watchdog, never throttled)
-- **Tier 2**: Control Loop @ 10Hz (100ms - robot motion, skill execution)
-- **Tier 3**: Perception Loop @ 10Hz (100ms - DINOv3, SAM3, V-JEPA 2)
-- **Tier 4**: Learning Loop (offline - FHE encryption, FL aggregation)
+### 4-Tier Timing Architecture (Jetson Thor + FP4)
+- **Tier 1**: Safety Loop @ 1kHz (V-JEPA 2 Giant + backup model, never throttled)
+- **Tier 2**: Control/Perception @ 200Hz (5ms - UPGRADED with FP4 quantization!)
+- **Tier 3**: Learning Loop @ 10Hz (IL training, skill distillation)
+- **Tier 4**: Background (anomaly detection, FL aggregation)
+
+### Compute Budget by Precision
+
+**Jetson Thor Blackwell Architecture:**
+| Precision | TFLOPS | Use Case |
+|-----------|--------|----------|
+| **FP4/INT4** | 2070 | Quantized inference (primary) |
+| **FP8** | 275 | Mixed precision |
+| **FP16** | 137 | Training, high-precision inference |
+| **FP32** | 68 | Gradient computation |
+
+### Dynamic Compute Scaling (2070 FP4 TFLOPS)
+
+Compute scales dynamically with connected peripherals and active skills:
+
+#### Fixed Allocations (750 TFLOPS - Always Reserved)
+| Component | TFLOPS | Purpose |
+|-----------|--------|---------|
+| **Safety V-JEPA 2 Giant** | 150 | Collision prediction @ 1kHz |
+| **Safety Ensemble** | 100 | Multi-model safety |
+| **Safety Backup** | 100 | Redundant safety model |
+| **Force/Torque Prediction** | 50 | Predictive force limiting |
+| **Core VLA + ACT** | 80 | Base action models |
+| **Learning Pipeline** | 170 | IL, MOAI, distillation |
+| **Background** | 100 | Anomaly, spatial, FHE |
+| **FIXED TOTAL** | **750** | Always allocated |
+
+#### Per-Peripheral Scaling (1320 TFLOPS Available)
+| Peripheral | TFLOPS Each | Components |
+|------------|-------------|------------|
+| **ONVIF Camera** | 60.0 | DINOv3 (15) + SAM3 (25) + Depth (10) + Pose (7.5) + Fusion (2.5) |
+| **Glove (DYGlove/MANUS)** | 30.0 | Retargeting (15) + Haptics (5) + Grasp Planning (10) |
+
+#### Maximum Peripherals Per Jetson Thor
+| Configuration | Cameras | Gloves | Compute Used | Headroom |
+|---------------|---------|--------|--------------|----------|
+| **Minimal** | 4 | 2 | 990 TFLOPS | 1080 |
+| **Recommended** | 12 | 2 | 1470 TFLOPS | 600 |
+| **Maximum** | 22 | 4 | 1870 TFLOPS | 200 |
+
+```
+Maximum Cameras: 22  (at 60 TFLOPS each)
+Maximum Gloves:  4   (2 pairs, left+right)
+```
+
+### Skill Execution Model (Hybrid Edge/Cloud)
+
+**Not all skills run on Jetson Thor.** Skills are split by latency requirements:
+
+| Location | Latency | Skill Type | Examples |
+|----------|---------|------------|----------|
+| **On-Device** | <5ms | Real-time control @ 200Hz | Grasping, locomotion, reactive behaviors |
+| **Cloud** | 100ms-1s | Planning & reasoning | Task decomposition, skill selection, LLM planning |
+
+#### On-Device Skills (Use TFLOPS Budget)
+Only skills requiring real-time control consume on-device compute:
+- **Base skill**: 20 TFLOPS each
+- **Large manipulation skill**: 50 TFLOPS each
+- **Max concurrent**: 4 real-time skills
+
+#### Cloud Skills (FREE - No On-Device Compute)
+Planning and reasoning skills run in cloud:
+- Task decomposition and goal planning
+- Skill discovery and MoE routing
+- Natural language understanding
+- Long-horizon prediction
+
+```
+Real-time skills: On-device (20-50 TFLOPS each, max 4 concurrent)
+Planning skills:  Cloud (unlimited, 100ms-1s latency acceptable)
+Skill cache:      100 skills pre-loaded for quick activation
+```
+
+#### VLA Boost (On-Demand)
+| Capability | TFLOPS | When Activated |
+|------------|--------|----------------|
+| **OpenVLA 7B** | +150 | Complex manipulation tasks |
+| **World Model Boost** | +100 | Long-horizon planning |
+| **Physics Prediction** | +60 | Contact-rich tasks |
+| **Human Intent** | +50 | Human-robot interaction |
+
+### FP16 Training Budget (137 TFLOPS)
+
+| Component | TFLOPS | Purpose |
+|-----------|--------|---------|
+| **Gradient Computation** | 60 | Backpropagation |
+| **Optimizer + Loss** | 45 | Adam/AdamW, cross-entropy |
+| **Validation + Reserve** | 32 | Model evaluation, spikes |
+
+> **Key Insight**: Dynamic scaling allows the system to grow from 4 cameras to 22 cameras, and from 2 gloves to 4 gloves, while maintaining safety guarantees. Compute is allocated on-demand as peripherals connect.
 
 ### Privacy-Preserving Learning
 - **TenSEAL/N2HE**: 128-bit homomorphic encryption for gradients
