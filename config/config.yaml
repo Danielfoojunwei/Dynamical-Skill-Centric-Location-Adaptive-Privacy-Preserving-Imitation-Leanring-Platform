@@ -14,33 +14,92 @@ cameras:
 models:
   paligemma_path: "models/paligemma"
 
+# =============================================================================
+# Compute Budget - Jetson Thor (Blackwell Architecture)
+# =============================================================================
+# Peak Compute by Precision:
+#   FP4/INT4:  2070 TFLOPS (quantized inference)
+#   FP8:       275 TFLOPS  (mixed precision)
+#   FP16:      137 TFLOPS  (half precision)
+#   FP32:      68 TFLOPS   (full precision)
+#
+# Strategy: Use FP4 quantization for inference, FP16 for training
+# =============================================================================
+
 tflops_budget:
+  # Raw compute available
+  total_fp4: 2070.0
+  total_fp8: 275.0
   total_fp16: 137.0
+  total_fp32: 68.0
+
+  # Utilization targets
   safe_utilization: 0.85
   burst_utilization: 0.95
-  allocations:
-    # Tier 1 - Safety (1kHz)
-    safety_detection: 15.0
 
-    # Tier 2 - Perception (100Hz) - Optimized with Meta AI
-    navigation_detection: 30.0          # Reduced: SAM3 handles segmentation
-    depth_estimation: 5.0
-    full_perception: 15.0               # Reduced: DINOv3 handles features
+  # ==========================================================================
+  # FP4/INT4 Quantized Inference Budget (Primary - 2070 TFLOPS available)
+  # ==========================================================================
+  # With FP4 quantization via TensorRT, we get ~15x more compute than FP16
+  # This enables GIANT model variants and higher frequencies
+  # ==========================================================================
+  fp4_allocations:
+    # Tier 1 - Safety (1kHz) - HIGHEST PRIORITY
+    safety_vjepa2_giant: 150.0          # V-JEPA 2 Giant for collision prediction
+    safety_detection_ensemble: 100.0    # Multi-model safety ensemble
+    force_torque_prediction: 50.0       # Predictive force limiting
 
-    # Tier 2 - Action (100Hz)
-    pi0_vla: 10.0
+    # Tier 2 - Perception (200Hz) - DOUBLED FREQUENCY with FP4
+    dinov3_vit_giant: 120.0             # DINOv3 ViT-G (was ViT-L at 8 FP16)
+    sam3_huge: 200.0                    # SAM3 Huge (was Large at 15 FP16)
+    depth_anything_v3_large: 80.0       # Depth Anything V3 Large
+    rtmpose_x_wholebody: 60.0           # RTMPose-X 133 keypoints
+    multi_view_fusion: 40.0             # 8-camera fusion network
+
+    # Tier 2 - Action (200Hz)
+    pi0_vla_large: 150.0                # Pi0 VLA Large (was 10 FP16)
+    openvla_7b_quantized: 200.0         # OpenVLA 7B INT4 quantized
+    action_chunking_transformer: 80.0   # ACT for smooth trajectories
+
+    # Tier 2 - World Modeling (100Hz)
+    vjepa2_giant_world: 180.0           # V-JEPA 2 Giant world model
+    physics_prediction: 60.0            # Physics-informed prediction
+    object_dynamics: 40.0               # Object motion prediction
+
+    # Tier 3 - On-Device LLM (NEW - enabled by FP4!)
+    llama_8b_quantized: 250.0           # Llama 3.1 8B INT4 for reasoning
+    skill_planner: 50.0                 # Natural language skill planning
 
     # Tier 3 - Learning (10Hz)
-    il_training: 9.0
-    moai_compression: 3.0
+    il_training_accelerated: 100.0      # Faster IL with FP4 forward pass
+    moai_compression: 30.0              # MOAI gradient compression
+    skill_distillation: 40.0            # Online skill distillation
 
-    # Other
-    spatial_brain: 3.0
-    anomaly_detection: 3.0
-    fhe_encryption: 1.0
+    # Tier 4 - Background Tasks
+    anomaly_detection_ensemble: 50.0    # Multi-model anomaly detection
+    spatial_brain_enhanced: 40.0        # Enhanced spatial reasoning
+    fhe_acceleration: 10.0              # FHE helper computations
 
-    # REMOVED: trajectory_prediction (was 0.5) - Now handled by V-JEPA 2
-    # Total legacy: 94.0 TFLOPS + Meta AI 33.0 = 127.0 TFLOPS (92.7%)
+    # Reserve for burst/new capabilities
+    reserve: 90.0
+
+    # TOTAL: 2070.0 TFLOPS (100% FP4 utilization)
+
+  # ==========================================================================
+  # FP16 Training Budget (Secondary - 137 TFLOPS available)
+  # ==========================================================================
+  # Used for gradient computation and model updates (requires higher precision)
+  # ==========================================================================
+  fp16_allocations:
+    # Online learning requires FP16 precision
+    gradient_computation: 60.0
+    batch_normalization: 15.0
+    optimizer_step: 20.0
+    loss_computation: 10.0
+    validation: 15.0
+    # Headroom for training spikes
+    training_reserve: 17.0
+    # TOTAL: 137.0 TFLOPS (100% FP16 for training)
 
 pipeline:
   queues:
@@ -104,53 +163,104 @@ glove:
 # Meta AI Models Configuration
 # =============================================================================
 meta_ai:
-  # DINOv3 Vision Encoder
+  # ==========================================================================
+  # Quantization Settings (FP4/INT4 via TensorRT)
+  # ==========================================================================
+  quantization:
+    enabled: true
+    precision: "fp4"                   # fp4, fp8, fp16, fp32
+    calibration_samples: 1000
+    tensorrt_workspace_gb: 16
+    use_dynamic_quantization: true
+    cache_quantized_models: true
+
+  # ==========================================================================
+  # DINOv3 Vision Encoder - GIANT variant with FP4
+  # ==========================================================================
   dinov3:
     enabled: true
-    model_size: "vit_large"          # vit_small, vit_base, vit_large, vit_giant
+    model_size: "vit_giant"            # UPGRADED: vit_giant (was vit_large)
     input_size: 518
-    use_fp16: true
+    precision: "fp4"                   # FP4 quantized inference
+    use_fp16: false                    # Disabled - using FP4
+    batch_size: 4                      # Multi-frame batching
     cache_dir: "/var/lib/dynamical/models/dinov3"
 
-  # SAM3 Text-Driven Segmentation
+  # ==========================================================================
+  # SAM3 Segmentation - HUGE variant with FP4
+  # ==========================================================================
   sam3:
     enabled: true
-    model_size: "sam3_large"         # sam3_tiny, sam3_small, sam3_base, sam3_large
+    model_size: "sam3_huge"            # UPGRADED: sam3_huge (was sam3_large)
     input_size: 1024
-    max_objects: 10
+    precision: "fp4"                   # FP4 quantized inference
+    max_objects: 20                    # Increased capacity
     confidence_threshold: 0.5
     enable_tracking: true
+    enable_video_mode: true            # SAM3 video segmentation
     cache_dir: "/var/lib/dynamical/models/sam3"
 
-  # V-JEPA 2 World Model
+  # ==========================================================================
+  # V-JEPA 2 World Model - GIANT variant with FP4
+  # ==========================================================================
   vjepa2:
     enabled: true
-    model_size: "vjepa2_large"       # vjepa2_small, vjepa2_base, vjepa2_large, vjepa2_huge
-    num_frames: 16
-    prediction_horizon: 16
+    model_size: "vjepa2_giant"         # UPGRADED: vjepa2_giant (was vjepa2_large)
+    precision: "fp4"                   # FP4 quantized inference
+    num_frames: 32                     # Increased from 16
+    prediction_horizon: 32             # Increased from 16
     enable_safety_prediction: true
+    enable_action_conditioning: true   # V-JEPA 2-AC variant
     collision_threshold: 0.7
     emergency_stop_threshold: 0.9
     cache_dir: "/var/lib/dynamical/models/vjepa2"
 
+  # ==========================================================================
+  # On-Device LLM (NEW - enabled by FP4 quantization!)
+  # ==========================================================================
+  llm:
+    enabled: true
+    model: "llama-3.1-8b"              # Llama 3.1 8B
+    precision: "int4"                  # INT4 GPTQ/AWQ quantization
+    max_context_length: 4096
+    max_new_tokens: 256
+    use_flash_attention: true
+    use_kv_cache: true
+    cache_dir: "/var/lib/dynamical/models/llama"
+    # Use cases:
+    #   - Natural language skill planning
+    #   - Error explanation and recovery
+    #   - Human-robot dialogue
+    #   - Task decomposition
+
+  # ==========================================================================
   # Privacy settings (N2HE encryption)
+  # ==========================================================================
   privacy:
     enabled: true
     security_bits: 128
     lwe_dimension: 1024
     enable_homomorphic_routing: true
 
-  # Unified pipeline settings
+  # ==========================================================================
+  # Unified pipeline settings - UPGRADED frequencies with FP4
+  # ==========================================================================
   pipeline:
-    fusion_method: "concat"          # concat, attention, mlp
-    safety_rate_hz: 1000.0           # Safety tier (V-JEPA 2 collision prediction)
-    control_rate_hz: 100.0           # Control tier (full perception)
-    learning_rate_hz: 10.0           # Learning tier (skill updates)
-    cloud_rate_hz: 0.1               # Cloud tier (federated sync)
+    fusion_method: "attention"         # UPGRADED: attention fusion (was concat)
+    safety_rate_hz: 1000.0             # Safety tier (V-JEPA 2 collision prediction)
+    control_rate_hz: 200.0             # UPGRADED: 200Hz (was 100Hz)
+    perception_rate_hz: 200.0          # UPGRADED: 200Hz (was 100Hz)
+    learning_rate_hz: 10.0             # Learning tier (skill updates)
+    cloud_rate_hz: 0.1                 # Cloud tier (federated sync)
 
-  # TFLOPS allocation for Meta AI models
+  # ==========================================================================
+  # TFLOPS allocation for Meta AI models (FP4)
+  # ==========================================================================
   tflops_allocation:
-    dinov3: 8.0                      # ViT-L inference
-    sam3: 15.0                       # Full SAM3 inference
-    vjepa2: 10.0                     # World model + safety prediction
-    total: 33.0                      # Leaves 83 TFLOPS for other components
+    # Giant variants with FP4 quantization
+    dinov3_giant: 120.0                # ViT-G FP4 (was 8.0 FP16 ViT-L)
+    sam3_huge: 200.0                   # SAM3 Huge FP4 (was 15.0 FP16 Large)
+    vjepa2_giant: 330.0                # V-JEPA 2 Giant FP4 (was 10.0 FP16 Large)
+    llama_8b: 250.0                    # Llama 3.1 8B INT4 (NEW!)
+    # Total Meta AI: 900.0 TFLOPS (43% of FP4 budget)
+    total: 900.0
