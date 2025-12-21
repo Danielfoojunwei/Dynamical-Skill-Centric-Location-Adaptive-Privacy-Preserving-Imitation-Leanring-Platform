@@ -205,19 +205,45 @@ Compute scales dynamically with connected peripherals and active skills:
 |------------|-------------|------------|
 | **ONVIF Camera** | 60.0 | DINOv3 (15) + SAM3 (25) + Depth (10) + Pose (7.5) + Fusion (2.5) |
 | **Glove (DYGlove/MANUS)** | 30.0 | Retargeting (15) + Haptics (5) + Grasp Planning (10) |
-| **Skill Expert** | 20-50 | Base (20) or Large manipulation (50) |
 
 #### Maximum Peripherals Per Jetson Thor
-| Configuration | Cameras | Gloves | Skills | Compute Used | Headroom |
-|---------------|---------|--------|--------|--------------|----------|
-| **Minimal** | 4 | 2 | 2 | 990 TFLOPS | 1080 |
-| **Recommended** | 12 | 2 | 4 | 1530 TFLOPS | 540 |
-| **Maximum** | 22 | 4 | 10 | 2050 TFLOPS | 20 |
+| Configuration | Cameras | Gloves | Compute Used | Headroom |
+|---------------|---------|--------|--------------|----------|
+| **Minimal** | 4 | 2 | 990 TFLOPS | 1080 |
+| **Recommended** | 12 | 2 | 1470 TFLOPS | 600 |
+| **Maximum** | 22 | 4 | 1870 TFLOPS | 200 |
 
 ```
 Maximum Cameras: 22  (at 60 TFLOPS each)
 Maximum Gloves:  4   (2 pairs, left+right)
-Maximum Skills:  10  (concurrent execution)
+```
+
+### Skill Execution Model (Hybrid Edge/Cloud)
+
+**Not all skills run on Jetson Thor.** Skills are split by latency requirements:
+
+| Location | Latency | Skill Type | Examples |
+|----------|---------|------------|----------|
+| **On-Device** | <5ms | Real-time control @ 200Hz | Grasping, locomotion, reactive behaviors |
+| **Cloud** | 100ms-1s | Planning & reasoning | Task decomposition, skill selection, LLM planning |
+
+#### On-Device Skills (Use TFLOPS Budget)
+Only skills requiring real-time control consume on-device compute:
+- **Base skill**: 20 TFLOPS each
+- **Large manipulation skill**: 50 TFLOPS each
+- **Max concurrent**: 4 real-time skills
+
+#### Cloud Skills (FREE - No On-Device Compute)
+Planning and reasoning skills run in cloud:
+- Task decomposition and goal planning
+- Skill discovery and MoE routing
+- Natural language understanding
+- Long-horizon prediction
+
+```
+Real-time skills: On-device (20-50 TFLOPS each, max 4 concurrent)
+Planning skills:  Cloud (unlimited, 100ms-1s latency acceptable)
+Skill cache:      100 skills pre-loaded for quick activation
 ```
 
 #### VLA Boost (On-Demand)

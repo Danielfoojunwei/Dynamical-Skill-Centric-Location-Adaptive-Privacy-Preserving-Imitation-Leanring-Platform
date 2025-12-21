@@ -96,13 +96,35 @@ tflops_budget:
     # TOTAL PER GLOVE: 30.0 TFLOPS
 
   # ---------------------------------------------------------------------------
-  # PER-SKILL ALLOCATION (scales with concurrent skills)
+  # SKILL EXECUTION MODEL
   # ---------------------------------------------------------------------------
-  per_skill_tflops:
-    skill_expert_base: 20.0             # Base skill expert inference
-    skill_expert_large: 50.0            # Large skill (manipulation)
+  # Skills run in TWO locations based on latency requirements:
+  #
+  #   ON-DEVICE (Jetson Thor):
+  #     - Real-time skills requiring <5ms latency (200Hz control)
+  #     - Manipulation, locomotion, reactive behaviors
+  #     - Safety-critical skills
+  #     - Uses on-device TFLOPS budget
+  #
+  #   CLOUD:
+  #     - Planning skills (100ms-1s latency acceptable)
+  #     - High-level reasoning, task decomposition
+  #     - Skill discovery and selection
+  #     - Uses cloud compute, no on-device TFLOPS
+  #
+  # Only CACHED skills consume on-device compute. Cloud skills are free.
+  # ---------------------------------------------------------------------------
+  skill_execution:
+    # Real-time skills (must be on-device)
+    realtime_skill_base: 20.0           # Base skill expert @ 200Hz
+    realtime_skill_large: 50.0          # Large manipulation skill @ 200Hz
     skill_blending: 5.0                 # MoE blending overhead per skill
-    # Skills use pool from remaining compute
+    max_concurrent_realtime: 4          # Max skills at 200Hz simultaneously
+
+    # Cloud skills (no on-device compute)
+    cloud_planning_latency_ms: 500      # Acceptable latency for planning
+    cloud_skill_cache_size: 100         # Skills cached for quick activation
+    prefetch_predicted_skills: true     # Pre-load likely next skills
 
   # ---------------------------------------------------------------------------
   # VLA SCALING (for complex tasks)
