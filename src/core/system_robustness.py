@@ -1,9 +1,15 @@
 """
 Dynamical.ai System Robustness Module
 
+Hardware Platform: NVIDIA Jetson Thor (Blackwell architecture)
+==============================================================
+- 128 GB unified memory allows all models to stay loaded
+- 2070 FP4 TFLOPS enables real-time giant model inference
+- MIG support for GPU partitioning and workload isolation
+
 This module addresses all critical system reliability concerns:
-1. WiFi 6E reliability with deterministic fallback
-2. GPU resource management to prevent contention
+1. WiFi 6E reliability with deterministic USB fallback
+2. GPU resource management (128GB enables all models simultaneously)
 3. Proper inter-tier communication (IPC)
 4. System redundancy for single points of failure
 5. Proactive health monitoring
@@ -16,9 +22,10 @@ Design Philosophy:
 - Fail-safe defaults: System stops safely on any critical failure
 - Deterministic fallback: Always have a wired backup path
 - Proactive monitoring: Detect issues BEFORE they cause failures
-- Resource isolation: Prevent component interference
+- Resource isolation: MIG partitioning prevents component interference
 
 References:
+- NVIDIA Jetson Thor: https://developer.nvidia.com/blog/introducing-nvidia-jetson-thor
 - DINOv3: https://github.com/facebookresearch/dinov3
 - SAM3: https://github.com/facebookresearch/sam3
 - V-JEPA 2: https://github.com/facebookresearch/vjepa2
@@ -351,25 +358,57 @@ class GPUResourceManager:
     """
     GPU resource manager to prevent contention between models.
 
+    Optimized for NVIDIA Jetson Thor with 128GB unified memory,
+    allowing all models to remain loaded simultaneously.
+
     Strategies:
-    1. Sequential execution with memory clearing
-    2. CUDA stream isolation
-    3. Memory pool management
+    1. All models loaded simultaneously (128GB enables this)
+    2. CUDA stream isolation per model
+    3. MIG partitioning for workload isolation
     4. Priority-based scheduling
     """
 
-    def __init__(self, device_id: int = 0, max_memory_gb: float = 8.0):
+    def __init__(self, device_id: int = 0, max_memory_gb: float = 120.0):
+        """
+        Initialize GPU resource manager for Jetson Thor.
+
+        Args:
+            device_id: GPU device ID
+            max_memory_gb: Maximum memory for AI (120GB of 128GB total)
+        """
         self.device_id = device_id
         self.max_memory_gb = max_memory_gb
 
-        # Model memory budgets (GB)
+        # Model memory budgets (GB) - Thor can handle GIANT models!
         self.memory_budgets = {
-            "dinov3": 2.0,
-            "sam3": 2.5,
-            "depth_anything": 1.5,
+            # Vision models (giant variants)
+            "dinov3_vitg": 8.0,    # Giant model
+            "dinov3_vitl": 4.0,    # Large model
+            "dinov3_vitb": 2.0,    # Base model
+            "dinov3": 8.0,         # Default to giant
+            # Segmentation
+            "sam3_large": 6.0,
+            "sam3_base": 3.0,
+            "sam3": 6.0,           # Default to large
+            # Depth
+            "depth_anything_large": 2.0,
+            "depth_anything": 2.0,
+            # Pose
+            "rtmpose_x": 1.0,
             "rtmpose": 1.0,
-            "vjepa2": 3.0,
-            "pi0_vla": 2.0,
+            # Video understanding (giant)
+            "vjepa2_giant": 10.0,
+            "vjepa2_large": 5.0,
+            "vjepa2": 10.0,        # Default to giant
+            # VLA models (large)
+            "pi0_large": 8.0,
+            "pi0_vla": 8.0,
+            # LLM (new on Thor!)
+            "llama_8b": 16.0,
+            "llama_8b_quantized": 8.0,
+            # Caches
+            "perception_cache": 10.0,
+            "action_buffer": 5.0,
         }
 
         # Execution lock for sequential processing
@@ -1077,36 +1116,46 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
 
     print("=" * 70)
-    print("DYNAMICAL.AI SYSTEM ROBUSTNESS MODULE")
+    print("DYNAMICAL.AI SYSTEM ROBUSTNESS MODULE (Jetson Thor)")
     print("=" * 70)
 
     manager = RobustSystemManager()
 
-    print("\n1. FHE Security Parameters:")
+    print("\n1. Hardware Platform:")
+    print("   NVIDIA Jetson Thor (Blackwell architecture)")
+    print("   - 128 GB LPDDR5X unified memory")
+    print("   - 2070 FP4 TFLOPS AI compute")
+    print("   - MIG support for workload isolation")
+
+    print("\n2. FHE Security Parameters:")
     print(f"   Security Level: {manager.fhe_config.security_level}-bit")
     print(f"   Post-Quantum: {manager.fhe_config.post_quantum_secure}")
     print(f"   Valid Config: {manager.fhe_config.validate()}")
 
-    print("\n2. Threat Model:")
+    print("\n3. Threat Model:")
     threat_model = manager.fhe_config.get_threat_model()
     print(f"   Adversary: {threat_model['adversary_model']}")
     print(f"   Assumption: {threat_model['security_assumption']}")
 
-    print("\n3. Dual-Path Connection:")
+    print("\n4. Dual-Path Connection:")
     print(f"   Primary: WiFi 6E (<2ms latency)")
     print(f"   Fallback: USB 3.2 (deterministic)")
     print(f"   Auto-failover: {DualPathConnection.FAILOVER_CONSECUTIVE_FAILURES} failures")
 
-    print("\n4. GPU Resource Management:")
-    print(f"   Max Memory: {manager.gpu_manager.max_memory_gb}GB")
-    print("   Memory Budgets:")
-    for model, budget in manager.gpu_manager.memory_budgets.items():
+    print("\n5. GPU Resource Management (Thor 128GB):")
+    print(f"   Available for AI: {manager.gpu_manager.max_memory_gb}GB")
+    print("   Model Memory Budgets (Giant variants):")
+    core_models = ["dinov3", "sam3", "vjepa2", "pi0_vla", "llama_8b"]
+    for model in core_models:
+        budget = manager.gpu_manager.memory_budgets.get(model, 0)
         print(f"     {model}: {budget}GB")
+    total = sum(manager.gpu_manager.memory_budgets.get(m, 0) for m in core_models)
+    print(f"   Total for core models: {total}GB (fits easily in 120GB)")
 
-    print("\n5. Fallback Levels:")
+    print("\n6. Fallback Levels:")
     for level in SafeFallbackController.FallbackLevel:
         print(f"   {level.value}: {level.name}")
 
     print("\n" + "=" * 70)
-    print("All robustness components initialized successfully!")
+    print("All robustness components initialized for Jetson Thor!")
     print("=" * 70)

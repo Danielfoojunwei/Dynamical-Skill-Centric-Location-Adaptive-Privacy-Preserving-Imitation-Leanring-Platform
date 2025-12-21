@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dynamical_edge"
-version = "0.3.3"
-description = "Dynamical Robotics Edge Platform (AGX Orin 32GB)"
+version = "0.5.0"
+description = "Dynamical Robotics Edge Platform (Jetson Thor 128GB)"
 authors = [
     {name = "Dynamical Robotics", email = "dev@dynamical.ai"},
 ]
