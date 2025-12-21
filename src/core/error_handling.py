@@ -17,8 +17,8 @@ Fallback Hierarchy:
 Each component has a defined fallback chain:
 
 Perception Pipeline:
-    DINOv2 fails    → Use cached features / zero features
-    SAM2 fails      → Use bounding boxes without masks
+    DINOv3 fails    → Use cached features / zero features
+    SAM3 fails      → Use bounding boxes without masks
     Depth fails     → Use default depth (2.0m) / last known depth
     Pose fails      → Use last known pose / zero pose
     Camera fails    → Use last frame / synthetic frame

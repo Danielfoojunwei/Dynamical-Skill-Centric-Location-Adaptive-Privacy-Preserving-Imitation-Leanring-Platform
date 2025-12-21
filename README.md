@@ -94,11 +94,13 @@ The Dynamical Edge Platform is an on-device runtime and training engine for huma
 
 State-of-the-art perception powered by Meta's latest foundation models:
 
-| Model | Purpose | Key Features |
-|-------|---------|--------------|
-| **DINOv2/v3** | Self-supervised vision | Dense feature extraction, zero-shot classification |
-| **SAM 2/3** | Segment Anything | Real-time object segmentation, video tracking |
-| **V-JEPA 2** | Video understanding | Temporal reasoning, action prediction |
+| Model | Purpose | Key Features | TFLOPS |
+|-------|---------|--------------|--------|
+| **DINOv3** | Self-supervised vision | Dense feature extraction, zero-shot classification | 8.0 |
+| **SAM3** | Segment Anything | Real-time object segmentation, video tracking | 15.0 |
+| **V-JEPA 2** | Video understanding | Temporal reasoning, action prediction, world modeling | 10.0 |
+
+**Meta AI Total: 33.0 TFLOPS**
 
 All models include privacy-preserving wrappers for federated learning:
 - Differential privacy for feature extraction
@@ -170,6 +172,31 @@ class CoordinationMetadata:
 - **Tier 2**: Control Loop @ 10Hz (100ms - robot motion, skill execution)
 - **Tier 3**: Perception Loop @ 10Hz (100ms - DINOv3, SAM3, V-JEPA 2)
 - **Tier 4**: Learning Loop (offline - FHE encryption, FL aggregation)
+
+### TFLOPS Budget (Operational)
+
+**Total Available: 137.0 FP16 TFLOPS (Jetson Thor)**
+
+| Component | TFLOPS | Tier | Rate |
+|-----------|--------|------|------|
+| **Safety Detection** | 15.0 | 1 | 1kHz |
+| **Navigation Detection** | 30.0 | 2 | 100Hz |
+| **Depth Estimation** | 5.0 | 2 | 100Hz |
+| **Full Perception** | 15.0 | 2 | 100Hz |
+| **Pi0 VLA** | 10.0 | 2 | 100Hz |
+| **IL Training** | 9.0 | 3 | 10Hz |
+| **MOAI Compression** | 3.0 | 3 | 10Hz |
+| **Spatial Brain** | 3.0 | 2 | 100Hz |
+| **Anomaly Detection** | 3.0 | 2 | 100Hz |
+| **FHE Encryption** | 1.0 | 4 | Offline |
+| *Legacy Subtotal* | *94.0* | | |
+| **DINOv3 (ViT-L)** | 8.0 | 2 | 100Hz |
+| **SAM3 (Large)** | 15.0 | 2 | 100Hz |
+| **V-JEPA 2 (Large)** | 10.0 | 1-2 | 1kHz safety / 100Hz control |
+| *Meta AI Subtotal* | *33.0* | | |
+| **TOTAL** | **127.0** | | **92.7% utilization** |
+
+> Safe utilization: 85% (116.5 TFLOPS) | Burst utilization: 95% (130.2 TFLOPS)
 
 ### Privacy-Preserving Learning
 - **TenSEAL/N2HE**: 128-bit homomorphic encryption for gradients

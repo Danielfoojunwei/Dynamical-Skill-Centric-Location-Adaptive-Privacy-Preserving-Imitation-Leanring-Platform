@@ -531,7 +531,7 @@ class PerceptionResult:
     depth_map: Optional[np.ndarray] = None  # [H, W] metric depth
 
     # Features
-    dinov2_features: Optional[np.ndarray] = None  # [1, 768] or similar
+    dinov3_features: Optional[np.ndarray] = None  # [1, 768] or similar
 
     # Processing times
     processing_times: Dict[str, float] = field(default_factory=dict)
@@ -576,8 +576,8 @@ class PerceptionLoop:
         self._result_lock = threading.Lock()
 
         # Model handles (lazy loaded)
-        self._dinov2_model = None
-        self._sam2_model = None
+        self._dinov3_model = None
+        self._sam3_model = None
         self._depth_model = None
         self._pose_model = None
 
@@ -639,7 +639,7 @@ class PerceptionLoop:
                             "body_keypoints_3d": result.body_keypoints_3d,
                             "object_detections": result.object_detections,
                             "depth_map": result.depth_map,
-                            "dinov2_features": result.dinov2_features,
+                            "dinov3_features": result.dinov3_features,
                             "timestamp": result.timestamp,
                         })
 
@@ -685,15 +685,15 @@ class PerceptionLoop:
         depth_map = self._run_depth_estimation(main_frame)
         processing_times["depth"] = (time.perf_counter() - t0) * 1000
 
-        # 4. Run DINOv2 features - WITH ERROR FALLBACK
+        # 4. Run DINOv3 features - WITH ERROR FALLBACK
         t0 = time.perf_counter()
-        dinov2_features = self._run_dinov2(main_frame)
-        processing_times["dinov2"] = (time.perf_counter() - t0) * 1000
+        dinov3_features = self._run_dinov3(main_frame)
+        processing_times["dinov3"] = (time.perf_counter() - t0) * 1000
 
-        # 5. Run SAM2 if objects detected - WITH ERROR FALLBACK
+        # 5. Run SAM3 if objects detected - WITH ERROR FALLBACK
         t0 = time.perf_counter()
-        object_detections, object_masks = self._run_sam2(main_frame)
-        processing_times["sam2"] = (time.perf_counter() - t0) * 1000
+        object_detections, object_masks = self._run_sam3(main_frame)
+        processing_times["sam3"] = (time.perf_counter() - t0) * 1000
 
         # 6. Triangulate 3D keypoints if multi-view
         body_keypoints_3d = None
@@ -709,7 +709,7 @@ class PerceptionLoop:
             object_detections=object_detections,
             object_masks=object_masks,
             depth_map=depth_map,
-            dinov2_features=dinov2_features,
+            dinov3_features=dinov3_features,
             processing_times=processing_times,
         )
 
@@ -750,26 +750,26 @@ class PerceptionLoop:
                 logger.warning(f"Depth estimation failed: {e}")
             return None
 
-    def _run_dinov2(self, frame: np.ndarray) -> Optional[np.ndarray]:
-        """Run DINOv2 feature extraction with error fallback."""
+    def _run_dinov3(self, frame: np.ndarray) -> Optional[np.ndarray]:
+        """Run DINOv3 feature extraction with error fallback."""
         try:
-            # Placeholder - would use facebookresearch/dinov2
+            # Placeholder - would use facebookresearch/dinov3
             return np.zeros(768)  # ViT-B features
         except Exception as e:
-            self._error_counts["dinov2"] += 1
-            if self._error_counts["dinov2"] < self._max_errors:
-                logger.warning(f"DINOv2 failed: {e}")
+            self._error_counts["dinov3"] += 1
+            if self._error_counts["dinov3"] < self._max_errors:
+                logger.warning(f"DINOv3 failed: {e}")
             return None
 
-    def _run_sam2(self, frame: np.ndarray) -> Tuple[Optional[List], Optional[np.ndarray]]:
-        """Run SAM2 segmentation with error fallback."""
+    def _run_sam3(self, frame: np.ndarray) -> Tuple[Optional[List], Optional[np.ndarray]]:
+        """Run SAM3 segmentation with error fallback."""
         try:
-            # Placeholder - would use facebookresearch/sam2
+            # Placeholder - would use facebookresearch/sam3
             return [], None
         except Exception as e:
-            self._error_counts["sam2"] += 1
-            if self._error_counts["sam2"] < self._max_errors:
-                logger.warning(f"SAM2 failed: {e}")
+            self._error_counts["sam3"] += 1
+            if self._error_counts["sam3"] < self._max_errors:
+                logger.warning(f"SAM3 failed: {e}")
             return None, None
 
     def _triangulate_keypoints(
