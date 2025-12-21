@@ -6,7 +6,7 @@
 
 > **On-Device Runtime and Training Engine for Humanoid Robots with Meta AI Foundation Models**
 
-The Dynamical Edge Platform is a clean, on-device runtime and training engine that exposes standardized interfaces for skill execution and federated learning. It runs on NVIDIA Jetson AGX Orin 32GB and features:
+The Dynamical Edge Platform is a clean, on-device runtime and training engine that exposes standardized interfaces for skill execution and federated learning. It runs on **NVIDIA Jetson Thor** (Blackwell architecture, 128GB, 2070 FP4 TFLOPS) with backwards compatibility for Jetson AGX Orin. Key features:
 
 - **Meta AI Foundation Models**: DINOv2/v3, SAM 2/3, V-JEPA 2 for state-of-the-art perception
 - **Mixture-of-Experts (MoE) Skill Architecture** with privacy-preserving federated learning
@@ -177,9 +177,9 @@ class CoordinationMetadata:
 
 | Component | Specification | Purpose |
 |-----------|--------------|---------|
-| **Compute** | NVIDIA Jetson AGX Orin 32GB | Edge inference (137 TFLOPS FP16) |
+| **Compute** | NVIDIA Jetson Thor (Blackwell) | Edge inference (2070 FP4 TFLOPS) |
 | **Storage** | 500GB NVMe SSD | Training data, skill cache |
-| **Memory** | 32GB Unified | VLA models, perception |
+| **Memory** | 128GB LPDDR5X Unified | Giant VLA models, full perception |
 | **Network** | Ethernet / Wi-Fi 6E | Cloud sync, device comms |
 | **Cameras** | ONVIF IP cameras (up to 12) | Multi-view perception |
 | **Gloves** | DYGlove 21-DOF haptic | Teleoperation input |
