@@ -184,58 +184,59 @@ class CoordinationMetadata:
 | **FP16** | 137 | Training, high-precision inference |
 | **FP32** | 68 | Gradient computation |
 
-### FP4 Inference Budget (2070 TFLOPS)
+### Dynamic Compute Scaling (2070 FP4 TFLOPS)
 
-With TensorRT FP4 quantization, we unlock **15x more compute** for inference:
+Compute scales dynamically with connected peripherals and active skills:
 
-| Component | TFLOPS | Tier | Rate | Upgrade |
-|-----------|--------|------|------|---------|
-| **Safety V-JEPA 2 Giant** | 150.0 | 1 | 1kHz | NEW: Giant variant |
-| **Safety Ensemble** | 100.0 | 1 | 1kHz | NEW: Multi-model |
-| **Force/Torque Prediction** | 50.0 | 1 | 1kHz | NEW |
-| *Safety Subtotal* | *300.0* | | | |
-| **DINOv3 ViT-Giant** | 120.0 | 2 | 200Hz | 15x (was 8 FP16) |
-| **SAM3 Huge** | 200.0 | 2 | 200Hz | 13x (was 15 FP16) |
-| **Depth Anything V3** | 80.0 | 2 | 200Hz | 16x |
-| **RTMPose-X** | 60.0 | 2 | 200Hz | Wholebody 133pt |
-| **Multi-View Fusion** | 40.0 | 2 | 200Hz | 8-camera |
-| *Perception Subtotal* | *500.0* | | | |
-| **Pi0 VLA Large** | 150.0 | 2 | 200Hz | 15x (was 10 FP16) |
-| **OpenVLA 7B Quantized** | 200.0 | 2 | 200Hz | NEW: Full 7B model |
-| **Action Chunking Transformer** | 80.0 | 2 | 200Hz | NEW |
-| *Action Subtotal* | *430.0* | | | |
-| **V-JEPA 2 Giant World Model** | 180.0 | 2 | 100Hz | 18x (was 10 FP16) |
-| **Physics Prediction** | 60.0 | 2 | 100Hz | NEW |
-| **Object Dynamics** | 40.0 | 2 | 100Hz | NEW |
-| *World Model Subtotal* | *280.0* | | | |
-| **Safety Backup Model** | 100.0 | 1 | 1kHz | NEW: Redundant safety |
-| **Tactile Prediction** | 50.0 | 2 | 200Hz | NEW: Force sensing |
-| **Human Intent Prediction** | 100.0 | 2 | 100Hz | NEW: HRI safety |
-| *Safety Redundancy Subtotal* | *250.0* | | | |
-| **IL Training Accelerated** | 100.0 | 3 | 10Hz | 11x |
-| **MOAI Compression** | 30.0 | 3 | 10Hz | 10x |
-| **Skill Distillation** | 40.0 | 3 | 10Hz | NEW |
-| *Learning Subtotal* | *170.0* | | | |
-| **Anomaly Ensemble** | 50.0 | 4 | Background | Multi-model |
-| **Spatial Brain Enhanced** | 40.0 | 4 | Background | Enhanced |
-| **Reserve** | 90.0 | - | - | Future capabilities |
-| **TOTAL** | **2070.0** | | | **100% FP4 utilization** |
+#### Fixed Allocations (750 TFLOPS - Always Reserved)
+| Component | TFLOPS | Purpose |
+|-----------|--------|---------|
+| **Safety V-JEPA 2 Giant** | 150 | Collision prediction @ 1kHz |
+| **Safety Ensemble** | 100 | Multi-model safety |
+| **Safety Backup** | 100 | Redundant safety model |
+| **Force/Torque Prediction** | 50 | Predictive force limiting |
+| **Core VLA + ACT** | 80 | Base action models |
+| **Learning Pipeline** | 170 | IL, MOAI, distillation |
+| **Background** | 100 | Anomaly, spatial, FHE |
+| **FIXED TOTAL** | **750** | Always allocated |
+
+#### Per-Peripheral Scaling (1320 TFLOPS Available)
+| Peripheral | TFLOPS Each | Components |
+|------------|-------------|------------|
+| **ONVIF Camera** | 60.0 | DINOv3 (15) + SAM3 (25) + Depth (10) + Pose (7.5) + Fusion (2.5) |
+| **Glove (DYGlove/MANUS)** | 30.0 | Retargeting (15) + Haptics (5) + Grasp Planning (10) |
+| **Skill Expert** | 20-50 | Base (20) or Large manipulation (50) |
+
+#### Maximum Peripherals Per Jetson Thor
+| Configuration | Cameras | Gloves | Skills | Compute Used | Headroom |
+|---------------|---------|--------|--------|--------------|----------|
+| **Minimal** | 4 | 2 | 2 | 990 TFLOPS | 1080 |
+| **Recommended** | 12 | 2 | 4 | 1530 TFLOPS | 540 |
+| **Maximum** | 22 | 4 | 10 | 2050 TFLOPS | 20 |
+
+```
+Maximum Cameras: 22  (at 60 TFLOPS each)
+Maximum Gloves:  4   (2 pairs, left+right)
+Maximum Skills:  10  (concurrent execution)
+```
+
+#### VLA Boost (On-Demand)
+| Capability | TFLOPS | When Activated |
+|------------|--------|----------------|
+| **OpenVLA 7B** | +150 | Complex manipulation tasks |
+| **World Model Boost** | +100 | Long-horizon planning |
+| **Physics Prediction** | +60 | Contact-rich tasks |
+| **Human Intent** | +50 | Human-robot interaction |
 
 ### FP16 Training Budget (137 TFLOPS)
 
-Used for gradient computation requiring higher precision:
-
 | Component | TFLOPS | Purpose |
 |-----------|--------|---------|
-| **Gradient Computation** | 60.0 | Backpropagation |
-| **Batch Normalization** | 15.0 | Statistics |
-| **Optimizer Step** | 20.0 | Adam/AdamW |
-| **Loss Computation** | 10.0 | Cross-entropy, MSE |
-| **Validation** | 15.0 | Model evaluation |
-| **Reserve** | 17.0 | Training spikes |
-| **TOTAL** | **137.0** | **100% FP16 for training** |
+| **Gradient Computation** | 60 | Backpropagation |
+| **Optimizer + Loss** | 45 | Adam/AdamW, cross-entropy |
+| **Validation + Reserve** | 32 | Model evaluation, spikes |
 
-> **Key Insight**: FP4 quantization enables running GIANT model variants at 2x frequency (200Hz vs 100Hz) with 250 TFLOPS dedicated to redundant safety systems for human-robot interaction.
+> **Key Insight**: Dynamic scaling allows the system to grow from 4 cameras to 22 cameras, and from 2 gloves to 4 gloves, while maintaining safety guarantees. Compute is allocated on-demand as peripherals connect.
 
 ### Privacy-Preserving Learning
 - **TenSEAL/N2HE**: 128-bit homomorphic encryption for gradients

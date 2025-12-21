@@ -38,53 +38,112 @@ tflops_budget:
   burst_utilization: 0.95
 
   # ==========================================================================
-  # FP4/INT4 Quantized Inference Budget (Primary - 2070 TFLOPS available)
+  # FP4/INT4 Compute Model - DYNAMIC SCALING
   # ==========================================================================
-  # With FP4 quantization via TensorRT, we get ~15x more compute than FP16
-  # This enables GIANT model variants and higher frequencies
+  # Compute scales with: cameras, gloves, concurrent skills
+  # Fixed allocations for safety, dynamic for peripherals
   # ==========================================================================
-  fp4_allocations:
-    # Tier 1 - Safety (1kHz) - HIGHEST PRIORITY
-    safety_vjepa2_giant: 150.0          # V-JEPA 2 Giant for collision prediction
+
+  # ---------------------------------------------------------------------------
+  # FIXED ALLOCATIONS (always reserved, regardless of peripherals)
+  # ---------------------------------------------------------------------------
+  fixed_allocations:
+    # Tier 1 - Safety (1kHz) - NEVER REDUCED
+    safety_vjepa2_giant: 150.0          # V-JEPA 2 Giant collision prediction
     safety_detection_ensemble: 100.0    # Multi-model safety ensemble
-    force_torque_prediction: 50.0       # Predictive force limiting
-
-    # Tier 2 - Perception (200Hz) - DOUBLED FREQUENCY with FP4
-    dinov3_vit_giant: 120.0             # DINOv3 ViT-G (was ViT-L at 8 FP16)
-    sam3_huge: 200.0                    # SAM3 Huge (was Large at 15 FP16)
-    depth_anything_v3_large: 80.0       # Depth Anything V3 Large
-    rtmpose_x_wholebody: 60.0           # RTMPose-X 133 keypoints
-    multi_view_fusion: 40.0             # 8-camera fusion network
-
-    # Tier 2 - Action (200Hz)
-    pi0_vla_large: 150.0                # Pi0 VLA Large (was 10 FP16)
-    openvla_7b_quantized: 200.0         # OpenVLA 7B INT4 quantized
-    action_chunking_transformer: 80.0   # ACT for smooth trajectories
-
-    # Tier 2 - World Modeling (100Hz)
-    vjepa2_giant_world: 180.0           # V-JEPA 2 Giant world model
-    physics_prediction: 60.0            # Physics-informed prediction
-    object_dynamics: 40.0               # Object motion prediction
-
-    # Tier 2 - Enhanced Safety Redundancy (reallocated from LLM)
     safety_backup_model: 100.0          # Redundant safety model
-    tactile_prediction: 50.0            # Tactile sensor prediction
-    human_intent_prediction: 100.0      # Predict human movement for HRI safety
+    force_torque_prediction: 50.0       # Predictive force limiting
+    # Safety subtotal: 400.0 TFLOPS (fixed)
 
-    # Tier 3 - Learning (10Hz)
-    il_training_accelerated: 100.0      # Faster IL with FP4 forward pass
-    moai_compression: 30.0              # MOAI gradient compression
-    skill_distillation: 40.0            # Online skill distillation
+    # Core action models (always loaded)
+    pi0_vla_base: 50.0                  # Base VLA always available
+    action_chunking_base: 30.0          # Base ACT always available
+    # Core action subtotal: 80.0 TFLOPS (fixed)
 
-    # Tier 4 - Background Tasks
-    anomaly_detection_ensemble: 50.0    # Multi-model anomaly detection
-    spatial_brain_enhanced: 40.0        # Enhanced spatial reasoning
-    fhe_acceleration: 10.0              # FHE helper computations
+    # Learning (10Hz) - runs continuously
+    il_training: 100.0
+    moai_compression: 30.0
+    skill_distillation: 40.0
+    # Learning subtotal: 170.0 TFLOPS (fixed)
 
-    # Reserve for burst/new capabilities
-    reserve: 90.0
+    # Background
+    anomaly_detection: 50.0
+    spatial_brain: 40.0
+    fhe_acceleration: 10.0
+    # Background subtotal: 100.0 TFLOPS (fixed)
 
-    # TOTAL: 2070.0 TFLOPS (100% FP4 utilization)
+    # FIXED TOTAL: 750.0 TFLOPS
+    total_fixed: 750.0
+
+  # ---------------------------------------------------------------------------
+  # PER-CAMERA ALLOCATION (scales with number of ONVIF cameras)
+  # ---------------------------------------------------------------------------
+  per_camera_tflops:
+    dinov3_per_camera: 15.0             # DINOv3 ViT-G per camera @ 200Hz
+    sam3_per_camera: 25.0               # SAM3 Huge per camera @ 200Hz
+    depth_per_camera: 10.0              # Depth Anything V3 per camera
+    pose_per_camera: 7.5                # RTMPose-X per camera
+    fusion_per_camera: 2.5              # Multi-view fusion contribution
+    # TOTAL PER CAMERA: 60.0 TFLOPS
+
+  # ---------------------------------------------------------------------------
+  # PER-GLOVE ALLOCATION (scales with number of gloves)
+  # ---------------------------------------------------------------------------
+  per_glove_tflops:
+    retargeting_per_glove: 15.0         # Hand retargeting @ 120Hz
+    haptic_prediction: 5.0              # Haptic feedback prediction
+    grasp_planning: 10.0                # Per-hand grasp planning
+    # TOTAL PER GLOVE: 30.0 TFLOPS
+
+  # ---------------------------------------------------------------------------
+  # PER-SKILL ALLOCATION (scales with concurrent skills)
+  # ---------------------------------------------------------------------------
+  per_skill_tflops:
+    skill_expert_base: 20.0             # Base skill expert inference
+    skill_expert_large: 50.0            # Large skill (manipulation)
+    skill_blending: 5.0                 # MoE blending overhead per skill
+    # Skills use pool from remaining compute
+
+  # ---------------------------------------------------------------------------
+  # VLA SCALING (for complex tasks)
+  # ---------------------------------------------------------------------------
+  vla_scaling:
+    openvla_7b_increment: 150.0         # Full OpenVLA 7B when needed
+    world_model_increment: 100.0        # V-JEPA 2 world model boost
+    physics_prediction: 60.0            # Physics-informed prediction
+    human_intent: 50.0                  # Human intent prediction for HRI
+
+  # ---------------------------------------------------------------------------
+  # DYNAMIC POOL CALCULATION
+  # ---------------------------------------------------------------------------
+  # Available = 2070 - fixed (750) = 1320 TFLOPS for scaling
+  #
+  # Example configurations:
+  #   8 cameras + 2 gloves + 4 skills:
+  #     Cameras: 8 × 60 = 480 TFLOPS
+  #     Gloves:  2 × 30 = 60 TFLOPS
+  #     Skills:  4 × 25 = 100 TFLOPS (avg)
+  #     VLA boost: 150 TFLOPS
+  #     World model: 100 TFLOPS
+  #     Human intent: 50 TFLOPS
+  #     Total dynamic: 940 TFLOPS
+  #     Remaining: 380 TFLOPS reserve
+  #
+  #   16 cameras + 4 gloves + 8 skills:
+  #     Cameras: 16 × 60 = 960 TFLOPS
+  #     Gloves:  4 × 30 = 120 TFLOPS
+  #     Skills:  8 × 25 = 200 TFLOPS
+  #     Total dynamic: 1280 TFLOPS
+  #     Remaining: 40 TFLOPS reserve (near limit!)
+  # ---------------------------------------------------------------------------
+
+  # Maximum peripherals per Jetson Thor
+  max_peripherals:
+    max_cameras: 22                     # (2070-750) / 60 = 22 cameras max
+    max_gloves: 4                       # 2 pairs (left+right each)
+    max_concurrent_skills: 10           # Practical limit for blending
+    recommended_cameras: 12             # For comfortable headroom
+    recommended_gloves: 2               # 1 pair typical
 
   # ==========================================================================
   # FP16 Training Budget (Secondary - 137 TFLOPS available)
