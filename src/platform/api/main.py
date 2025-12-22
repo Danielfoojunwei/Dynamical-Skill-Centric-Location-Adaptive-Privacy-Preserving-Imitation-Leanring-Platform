@@ -941,7 +941,18 @@ async def glove_calibration_load(glove_id: str):
         return {"success": False, "error": str(e)}
 
 
-# --- Robot Skill Invoker API ---
+# --- Unified Skill Orchestrator API (NEW) ---
+
+from src.core.unified_skill_orchestrator import (
+    UnifiedSkillOrchestrator, OrchestrationRequest, OrchestrationResult,
+    SkillExecutionPlan, SkillStep, AssignmentStrategy, ExecutionTier,
+    get_orchestrator, configure_orchestrator
+)
+
+# Initialize unified orchestrator
+skill_orchestrator = get_orchestrator()
+
+# --- Robot Skill Invoker API (Layer 7 - Execution) ---
 
 from src.core.robot_skill_invoker import (
     RobotSkillInvoker, SkillInvocationRequest, ObservationState,
@@ -1075,6 +1086,197 @@ async def execute_skill(request: SkillInvokeRequest):
 async def get_invoker_stats():
     """Get skill invoker statistics."""
     return robot_skill_invoker.get_statistics()
+
+
+# =============================================================================
+# Unified Skill Orchestrator API (NEW)
+# =============================================================================
+# These endpoints provide the unified orchestration layer that combines:
+# - Task decomposition (what needs to be done)
+# - Skill selection (MoE routing)
+# - Robot assignment (spatial routing)
+# - Location adaptation (how to adapt skills)
+
+class OrchestrationRequestModel(BaseModel):
+    """Request for task orchestration."""
+    task_description: str
+    robot_id: Optional[str] = None  # Explicit robot, or None for auto-assign
+    workspace_id: Optional[str] = None
+    target_position: Optional[List[float]] = None
+    assignment_strategy: str = "nearest"  # nearest, least_busy, capability, round_robin
+    max_skills_per_step: int = 3
+
+
+class SiteConfigModel(BaseModel):
+    """Site configuration for orchestrator."""
+    workspaces: List[Dict[str, Any]]
+    robots: List[Dict[str, Any]]
+
+
+@app.post("/api/v1/orchestrator/configure", dependencies=[Depends(get_api_key)])
+async def configure_orchestrator_endpoint(config: SiteConfigModel):
+    """
+    Configure the orchestrator with site information.
+
+    Registers workspaces (physical zones) and robots for spatial routing.
+    """
+    try:
+        skill_orchestrator.configure({
+            "workspaces": config.workspaces,
+            "robots": config.robots,
+        })
+        return {
+            "success": True,
+            "workspaces_registered": len(config.workspaces),
+            "robots_registered": len(config.robots),
+        }
+    except Exception as e:
+        logger.error(f"Orchestrator configuration error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/v1/orchestrator/orchestrate", dependencies=[Depends(get_api_key)])
+async def orchestrate_task(request: OrchestrationRequestModel):
+    """
+    Orchestrate a task into an execution plan.
+
+    This is the unified entry point that handles:
+    - WHAT skill? (MoE routing)
+    - WHICH robot? (spatial routing)
+    - HOW to adapt? (location params)
+    - WHEN to execute? (timing tier)
+
+    Returns a complete SkillExecutionPlan with steps.
+    """
+    try:
+        strategy_map = {
+            "nearest": AssignmentStrategy.NEAREST,
+            "least_busy": AssignmentStrategy.LEAST_BUSY,
+            "capability": AssignmentStrategy.CAPABILITY,
+            "round_robin": AssignmentStrategy.ROUND_ROBIN,
+        }
+
+        target_pos = None
+        if request.target_position:
+            target_pos = np.array(request.target_position)
+
+        orch_request = OrchestrationRequest(
+            task_description=request.task_description,
+            robot_id=request.robot_id,
+            workspace_id=request.workspace_id,
+            target_position=target_pos,
+            assignment_strategy=strategy_map.get(request.assignment_strategy, AssignmentStrategy.NEAREST),
+            max_skills_per_step=request.max_skills_per_step,
+        )
+
+        result = skill_orchestrator.orchestrate(orch_request)
+
+        if result.success:
+            return {
+                "success": True,
+                "plan_id": result.plan.plan_id,
+                "task_description": result.plan.task_description,
+                "total_estimated_duration_ms": result.plan.total_estimated_duration_ms,
+                "orchestration_time_ms": result.orchestration_time_ms,
+                "steps": [
+                    {
+                        "step_id": step.step_id,
+                        "skill_ids": step.skill_ids,
+                        "weights": step.weights,
+                        "robot_id": step.robot_id,
+                        "workspace_id": step.workspace_id,
+                        "location_params": step.location_params,
+                        "tier": step.tier.value,
+                        "deadline_ms": step.deadline_ms,
+                        "depends_on": step.depends_on,
+                    }
+                    for step in result.plan.steps
+                ],
+            }
+        else:
+            return {"success": False, "error": result.error_message}
+
+    except Exception as e:
+        logger.error(f"Orchestration error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+class ExecuteStepRequest(BaseModel):
+    """Request to execute a step from an orchestration plan."""
+    step: Dict[str, Any]
+    observation: List[float]
+
+
+@app.post("/api/v1/orchestrator/execute_step", dependencies=[Depends(get_api_key)])
+async def execute_orchestrated_step(request: ExecuteStepRequest):
+    """
+    Execute a single step from an orchestration plan.
+
+    This bridges the orchestrator (planning) with the invoker (execution).
+    """
+    try:
+        # Reconstruct SkillStep from dict
+        step = SkillStep(
+            step_id=request.step.get("step_id", 0),
+            skill_ids=request.step.get("skill_ids", []),
+            weights=request.step.get("weights", []),
+            robot_id=request.step.get("robot_id", ""),
+            workspace_id=request.step.get("workspace_id"),
+            location_params=request.step.get("location_params", {}),
+            tier=ExecutionTier(request.step.get("tier", "control")),
+            deadline_ms=request.step.get("deadline_ms", 100.0),
+        )
+
+        observation = np.array(request.observation)
+        result = skill_orchestrator.execute_step(step, observation)
+
+        return result
+
+    except Exception as e:
+        logger.error(f"Step execution error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.post("/api/v1/orchestrator/update_robot_location", dependencies=[Depends(get_api_key)])
+async def update_robot_location(
+    robot_id: str,
+    position: List[float],
+    orientation: List[float],
+    camera_id: str
+):
+    """
+    Update robot location from perception.
+
+    Called by the perception pipeline when a robot is detected in a camera.
+    """
+    try:
+        skill_orchestrator.update_robot_location(
+            robot_id=robot_id,
+            position=np.array(position),
+            orientation=np.array(orientation),
+            camera_id=camera_id,
+        )
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/v1/orchestrator/status", dependencies=[Depends(get_api_key)])
+async def get_orchestrator_status():
+    """Get orchestrator status including registered workspaces and robots."""
+    return {
+        "workspaces": len(skill_orchestrator._workspaces),
+        "robots": len(skill_orchestrator._robots),
+        "robot_states": {
+            rid: {
+                "position": r.position.tolist(),
+                "workspace_id": r.workspace_id,
+                "current_task_count": r.current_task_count,
+                "capabilities": list(r.capabilities),
+            }
+            for rid, r in skill_orchestrator._robots.items()
+        },
+    }
 
 
 # =============================================================================

@@ -1,21 +1,25 @@
 import React, { useState, useEffect } from 'react';
-import { Activity, AlertTriangle, Eye, FileText, Clock, Search, RefreshCw, Brain, Shield, Zap } from 'lucide-react';
+import { Activity, AlertTriangle, Eye, FileText, Clock, Search, RefreshCw, Brain, Shield, Zap, GitBranch } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, AreaChart, Area } from 'recharts';
 import { fetchWithAuth } from './api';
 
 const Observability = () => {
-    const [activeTab, setActiveTab] = useState('blackbox');
+    const [activeTab, setActiveTab] = useState('orchestrator');
     const [blackboxData, setBlackboxData] = useState(null);
     const [vlaStatus, setVlaStatus] = useState(null);
     const [fheAudit, setFheAudit] = useState([]);
     const [incidents, setIncidents] = useState([]);
     const [loading, setLoading] = useState(false);
 
+    // Orchestrator status (NEW)
+    const [orchestratorStatus, setOrchestratorStatus] = useState(null);
+
     // RCA
     const [selectedIncident, setSelectedIncident] = useState(null);
     const [rcaReport, setRcaReport] = useState(null);
 
     useEffect(() => {
+        if (activeTab === 'orchestrator') fetchOrchestratorStatus();
         if (activeTab === 'blackbox') fetchBlackbox();
         if (activeTab === 'vla') fetchVlaStatus();
         if (activeTab === 'fhe') fetchFheAudit();
@@ -24,11 +28,22 @@ const Observability = () => {
     // Polling for live data
     useEffect(() => {
         const interval = setInterval(() => {
+            if (activeTab === 'orchestrator') fetchOrchestratorStatus();
             if (activeTab === 'vla') fetchVlaStatus();
             if (activeTab === 'blackbox') fetchBlackbox();
         }, 2000);
         return () => clearInterval(interval);
     }, [activeTab]);
+
+    const fetchOrchestratorStatus = async () => {
+        try {
+            const res = await fetchWithAuth('/api/v1/orchestrator/status');
+            const data = await res.json();
+            setOrchestratorStatus(data);
+        } catch (e) {
+            console.error("Failed to fetch orchestrator status", e);
+        }
+    };
 
     const fetchBlackbox = async () => {
         try {
@@ -90,6 +105,7 @@ const Observability = () => {
     };
 
     const tabs = [
+        { id: 'orchestrator', label: 'Orchestrator', icon: GitBranch },
         { id: 'blackbox', label: 'Flight Recorder', icon: FileText },
         { id: 'vla', label: 'VLA Model', icon: Brain },
         { id: 'fhe', label: 'FHE Audit', icon: Shield },
@@ -126,6 +142,87 @@ const Observability = () => {
                     </button>
                 ))}
             </div>
+
+            {/* Unified Skill Orchestrator Status (NEW) */}
+            {activeTab === 'orchestrator' && (
+                <div className="space-y-6">
+                    <div className="grid grid-cols-4 gap-4">
+                        <div className="bg-gray-800 p-4 rounded-lg">
+                            <div className="text-gray-400 text-sm">Workspaces</div>
+                            <div className="text-2xl font-bold text-blue-400">
+                                {orchestratorStatus?.workspaces || 0}
+                            </div>
+                        </div>
+                        <div className="bg-gray-800 p-4 rounded-lg">
+                            <div className="text-gray-400 text-sm">Robots Tracked</div>
+                            <div className="text-2xl font-bold text-green-400">
+                                {orchestratorStatus?.robots || 0}
+                            </div>
+                        </div>
+                        <div className="bg-gray-800 p-4 rounded-lg">
+                            <div className="text-gray-400 text-sm">Active Tasks</div>
+                            <div className="text-2xl font-bold text-yellow-400">
+                                {Object.values(orchestratorStatus?.robot_states || {}).reduce((sum, r) => sum + (r.current_task_count || 0), 0)}
+                            </div>
+                        </div>
+                        <div className="bg-gray-800 p-4 rounded-lg">
+                            <div className="text-gray-400 text-sm">Status</div>
+                            <div className="text-2xl font-bold text-green-400">READY</div>
+                        </div>
+                    </div>
+
+                    <div className="bg-gray-800 p-4 rounded-lg">
+                        <h3 className="text-lg font-semibold mb-3">Architecture Layers</h3>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="bg-gray-900 p-3 rounded">
+                                <div className="text-sm text-gray-400 mb-1">Layer 4: Skill Selection</div>
+                                <div className="text-green-400">MoESkillRouter</div>
+                                <div className="text-xs text-gray-500">WHAT skill to use?</div>
+                            </div>
+                            <div className="bg-gray-900 p-3 rounded">
+                                <div className="text-sm text-gray-400 mb-1">Layer 5: Robot Assignment</div>
+                                <div className="text-green-400">TaskRouter</div>
+                                <div className="text-xs text-gray-500">WHICH robot executes?</div>
+                            </div>
+                            <div className="bg-gray-900 p-3 rounded">
+                                <div className="text-sm text-gray-400 mb-1">Layer 6: Location Adaptation</div>
+                                <div className="text-green-400">LocationAdaptiveSkillManager</div>
+                                <div className="text-xs text-gray-500">HOW to adapt params?</div>
+                            </div>
+                            <div className="bg-gray-900 p-3 rounded">
+                                <div className="text-sm text-gray-400 mb-1">Layer 7: Execution</div>
+                                <div className="text-green-400">RobotSkillInvoker @ 200Hz</div>
+                                <div className="text-xs text-gray-500">EXECUTE on edge</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="bg-gray-800 p-4 rounded-lg">
+                        <h3 className="text-lg font-semibold mb-3">Robot States</h3>
+                        {Object.keys(orchestratorStatus?.robot_states || {}).length > 0 ? (
+                            <div className="space-y-2">
+                                {Object.entries(orchestratorStatus?.robot_states || {}).map(([robotId, state]) => (
+                                    <div key={robotId} className="bg-gray-900 p-3 rounded flex justify-between items-center">
+                                        <div>
+                                            <div className="font-semibold">{robotId}</div>
+                                            <div className="text-xs text-gray-400">
+                                                Workspace: {state.workspace_id || 'None'} |
+                                                Tasks: {state.current_task_count} |
+                                                Capabilities: {state.capabilities?.join(', ') || 'None'}
+                                            </div>
+                                        </div>
+                                        <div className="text-sm text-gray-400">
+                                            Position: [{state.position?.map(p => p.toFixed(2)).join(', ')}]
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <div className="text-gray-500">No robots registered. Configure site via /api/v1/orchestrator/configure</div>
+                        )}
+                    </div>
+                </div>
+            )}
 
             {/* Blackbox / Flight Recorder */}
             {activeTab === 'blackbox' && (

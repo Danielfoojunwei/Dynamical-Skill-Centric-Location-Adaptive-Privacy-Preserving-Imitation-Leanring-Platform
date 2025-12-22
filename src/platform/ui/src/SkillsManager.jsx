@@ -57,6 +57,11 @@ const SkillsManager = () => {
     const [routingResult, setRoutingResult] = useState(null);
     const [taskDescription, setTaskDescription] = useState('');
 
+    // Orchestration state (NEW)
+    const [orchestrationResult, setOrchestrationResult] = useState(null);
+    const [orchestrationLoading, setOrchestrationLoading] = useState(false);
+    const [assignmentStrategy, setAssignmentStrategy] = useState('nearest');
+
     // Upload form state
     const [showUpload, setShowUpload] = useState(false);
     const [uploadForm, setUploadForm] = useState({
@@ -110,6 +115,29 @@ const SkillsManager = () => {
             setRoutingResult(data);
         } catch (e) {
             console.error("Routing failed", e);
+        }
+    };
+
+    // NEW: Unified orchestration (combines skill routing + robot assignment + location adaptation)
+    const handleOrchestrate = async () => {
+        if (!taskDescription.trim()) return;
+        setOrchestrationLoading(true);
+        try {
+            const res = await fetchWithAuth('/api/v1/orchestrator/orchestrate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    task_description: taskDescription,
+                    assignment_strategy: assignmentStrategy,
+                    max_skills_per_step: 3
+                })
+            });
+            const data = await res.json();
+            setOrchestrationResult(data);
+        } catch (e) {
+            console.error("Orchestration failed", e);
+        } finally {
+            setOrchestrationLoading(false);
         }
     };
 
@@ -200,15 +228,109 @@ const SkillsManager = () => {
                 </div>
             )}
 
-            {/* Task Router */}
+            {/* Unified Task Orchestrator (NEW) */}
+            <div className="bg-gradient-to-r from-gray-800 to-gray-900 p-4 rounded-lg mb-6 border border-purple-500/30">
+                <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
+                    <Zap className="text-yellow-400" /> Unified Skill Orchestrator
+                    <span className="text-xs bg-purple-600 px-2 py-0.5 rounded">NEW</span>
+                </h2>
+                <div className="text-xs text-gray-400 mb-3">
+                    Combines: WHAT skill (MoE) → WHICH robot (spatial) → HOW to adapt (location) → WHEN (timing tier)
+                </div>
+                <div className="flex gap-2 mb-3">
+                    <input
+                        type="text"
+                        placeholder="Describe your task (e.g., 'Pick up the red cube and place it on the shelf')"
+                        value={taskDescription}
+                        onChange={(e) => setTaskDescription(e.target.value)}
+                        className="flex-1 bg-gray-900 border border-gray-700 rounded px-4 py-2"
+                    />
+                    <select
+                        value={assignmentStrategy}
+                        onChange={(e) => setAssignmentStrategy(e.target.value)}
+                        className="bg-gray-900 border border-gray-700 rounded px-3 py-2"
+                    >
+                        <option value="nearest">Nearest Robot</option>
+                        <option value="least_busy">Least Busy</option>
+                        <option value="capability">By Capability</option>
+                        <option value="round_robin">Round Robin</option>
+                    </select>
+                    <button
+                        onClick={handleOrchestrate}
+                        disabled={orchestrationLoading}
+                        className="bg-purple-600 hover:bg-purple-700 px-6 py-2 rounded flex items-center gap-2 disabled:opacity-50"
+                    >
+                        {orchestrationLoading ? (
+                            <RefreshCw size={18} className="animate-spin" />
+                        ) : (
+                            <Zap size={18} />
+                        )}
+                        Orchestrate
+                    </button>
+                </div>
+                {orchestrationResult && orchestrationResult.success && (
+                    <div className="bg-gray-900 p-3 rounded space-y-3">
+                        <div className="flex justify-between text-sm">
+                            <span className="text-gray-400">Plan ID: <span className="text-white font-mono">{orchestrationResult.plan_id}</span></span>
+                            <span className="text-gray-400">Orchestrated in <span className="text-green-400">{orchestrationResult.orchestration_time_ms?.toFixed(2)}ms</span></span>
+                        </div>
+                        <div className="text-sm text-gray-400">
+                            Total Duration: <span className="text-white">{orchestrationResult.total_estimated_duration_ms?.toFixed(0)}ms</span> |
+                            Steps: <span className="text-white">{orchestrationResult.steps?.length || 0}</span>
+                        </div>
+                        <div className="space-y-2">
+                            {orchestrationResult.steps?.map((step, i) => (
+                                <div key={i} className="bg-gray-800 p-2 rounded">
+                                    <div className="flex justify-between items-center mb-1">
+                                        <span className="font-semibold text-sm">Step {step.step_id + 1}</span>
+                                        <span className={`text-xs px-2 py-0.5 rounded ${
+                                            step.tier === 'realtime' ? 'bg-red-600' :
+                                            step.tier === 'control' ? 'bg-blue-600' : 'bg-gray-600'
+                                        }`}>
+                                            {step.tier?.toUpperCase()}
+                                        </span>
+                                    </div>
+                                    <div className="grid grid-cols-3 gap-2 text-xs">
+                                        <div>
+                                            <span className="text-gray-400">Robot:</span>
+                                            <span className="ml-1 text-green-400">{step.robot_id}</span>
+                                        </div>
+                                        <div>
+                                            <span className="text-gray-400">Skills:</span>
+                                            <span className="ml-1 text-blue-400">{step.skill_ids?.join(', ')}</span>
+                                        </div>
+                                        <div>
+                                            <span className="text-gray-400">Workspace:</span>
+                                            <span className="ml-1 text-yellow-400">{step.workspace_id || 'auto'}</span>
+                                        </div>
+                                    </div>
+                                    {step.location_params && Object.keys(step.location_params).length > 0 && (
+                                        <div className="text-xs text-gray-500 mt-1">
+                                            Location: {JSON.stringify(step.location_params)}
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                )}
+                {orchestrationResult && !orchestrationResult.success && (
+                    <div className="bg-red-900/20 border border-red-500 p-3 rounded text-red-400 text-sm">
+                        Orchestration failed: {orchestrationResult.error}
+                    </div>
+                )}
+            </div>
+
+            {/* Legacy MoE Task Router */}
             <div className="bg-gray-800 p-4 rounded-lg mb-6">
                 <h2 className="text-lg font-semibold mb-3 flex items-center gap-2">
-                    <Brain className="text-purple-400" /> MoE Task Router
+                    <Brain className="text-purple-400" /> MoE Skill Router (Direct)
+                    <span className="text-xs text-gray-500">For skill selection only</span>
                 </h2>
                 <div className="flex gap-2 mb-3">
                     <input
                         type="text"
-                        placeholder="Describe your task (e.g., 'Pick up the red cube and place it on the plate')"
+                        placeholder="Task for MoE routing only..."
                         value={taskDescription}
                         onChange={(e) => setTaskDescription(e.target.value)}
                         className="flex-1 bg-gray-900 border border-gray-700 rounded px-4 py-2"
