@@ -45,10 +45,14 @@ Layer 6: SKILL ADAPTATION (Location, <1ms)
     Table height, shelf positions, obstacles, other robots
     └─► Returns location_params dict
 
-Layer 7: EXECUTION (Edge, 200Hz real-time)
-    EdgeSkillClient: Download skill if not cached, execute
-    VLA model inference → Robot actions at 200Hz
-    └─► Returns joint positions/velocities
+Layer 7: SKILL INVOCATION (Edge, 200Hz real-time)
+    RobotSkillInvoker.invoke(): Control loop execution engine
+    - Receives SkillExecutionPlan from orchestrator
+    - Converts plan steps to SkillInvocationRequest
+    - Runs safety checks (NEVER bypassed)
+    - Calls EdgeSkillClient for actual model inference
+    - Returns RobotAction at 200Hz
+    └─► Joint positions/velocities to robot controller
 
 Data Flow:
 ==========
@@ -80,13 +84,29 @@ Data Flow:
                                          ▼
     ┌──────────────────────────────────────────────────────────────────────────┐
     │                         EDGE (Jetson Thor)                                │
-    │  ┌────────────┐    ┌────────────┐    ┌────────────┐    ┌────────────┐   │
-    │  │   ONVIF    │    │   Skill    │    │    VLA     │    │   Robot    │   │
-    │  │  Cameras   │───►│   Cache    │───►│  Executor  │───►│  Control   │   │
-    │  └────────────┘    └────────────┘    └────────────┘    └────────────┘   │
-    │       │                                     │                            │
-    │       │ robot detections                    │ actions @ 200Hz            │
-    │       ▼                                     ▼                            │
+    │                                                                           │
+    │  ┌────────────────────────────────────────────────────────────────────┐  │
+    │  │              ROBOT SKILL INVOKER (Layer 7)                         │  │
+    │  │              robot_skill_invoker.py                                │  │
+    │  │                                                                    │  │
+    │  │  invoke(request) ─► safety_check() ─► execute_skills() ─► action   │  │
+    │  │       ▲                                      │                     │  │
+    │  │       │ SkillInvocationRequest               │                     │  │
+    │  │       │ (from orchestrator.execute_step)     ▼                     │  │
+    │  │       │                              ┌────────────┐                │  │
+    │  │       │                              │EdgeSkill   │                │  │
+    │  │       │                              │Client      │                │  │
+    │  │       │                              │(cache+VLA) │                │  │
+    │  │       │                              └────────────┘                │  │
+    │  └───────┼────────────────────────────────────┼───────────────────────┘  │
+    │          │                                    │                          │
+    │  ┌───────┴───────┐                    ┌───────▼───────┐                  │
+    │  │   ONVIF       │                    │    Robot      │                  │
+    │  │   Cameras     │                    │   Control     │                  │
+    │  │   (percept)   │                    │  @ 200Hz      │                  │
+    │  └───────┬───────┘                    └───────┬───────┘                  │
+    │          │                                    │                          │
+    │          ▼                                    ▼                          │
     │  ┌────────────┐                       ┌────────────┐                     │
     │  │  Location  │                       │   Safety   │                     │
     │  │  Tracker   │                       │   @ 1kHz   │                     │
@@ -826,15 +846,80 @@ class UnifiedSkillOrchestrator:
         return embedding / np.linalg.norm(embedding)
 
     # =========================================================================
-    # Execution Interface
+    # Execution Interface (Layer 7 - connects to RobotSkillInvoker)
     # =========================================================================
 
     def execute_step(self, step: SkillStep, observation: np.ndarray) -> Dict[str, Any]:
         """
-        Execute a single step of the plan.
+        Execute a single step of the plan via RobotSkillInvoker.
 
-        This sends the step to the appropriate edge device for execution.
+        The Orchestrator creates the PLAN, the Invoker EXECUTES it:
+
+            Orchestrator.orchestrate()  →  SkillExecutionPlan
+                                                   │
+                                                   ▼
+            Orchestrator.execute_step() →  RobotSkillInvoker.invoke()
+                                                   │
+                                                   ▼
+                                           RobotAction @ 200Hz
+
+        This function bridges orchestration (cloud planning) with
+        invocation (edge execution at 200Hz in the control loop).
         """
+        try:
+            # Import RobotSkillInvoker - the actual execution engine
+            from src.core.robot_skill_invoker import (
+                get_skill_invoker,
+                SkillInvocationRequest,
+                ObservationState,
+                InvocationMode,
+            )
+
+            invoker = get_skill_invoker()
+
+            # Convert numpy observation to ObservationState
+            obs_state = ObservationState(
+                joint_positions=observation[:23] if len(observation) >= 23 else observation,
+                joint_velocities=np.zeros(23),
+            )
+
+            # Create invocation request FROM orchestration step
+            # This is where the orchestrator's decisions flow into the invoker
+            request = SkillInvocationRequest(
+                robot_id=step.robot_id,
+                skill_ids=step.skill_ids,          # FROM orchestrator._route_to_skills()
+                blend_weights=step.weights,         # FROM MoE routing
+                observation=obs_state,
+                mode=InvocationMode.BLENDED if len(step.skill_ids) > 1 else InvocationMode.DIRECT,
+                deadline_ms=step.deadline_ms,
+            )
+
+            # Inject location params into the invoker's context
+            # These params modify skill behavior for the specific location
+            if step.location_params:
+                request.location_context = step.location_params
+
+            # Execute via RobotSkillInvoker (200Hz control loop)
+            result = invoker.invoke(request)
+
+            return {
+                "success": result.success,
+                "action": result.actions[0].to_command_vector() if result.actions else np.zeros(23),
+                "execution_time_ms": result.total_time_ms,
+                "skill_ids_used": result.skill_ids_used,
+                "safety_status": result.safety_status,
+            }
+
+        except ImportError:
+            # Fallback to EdgeSkillClient if invoker not available
+            return self._execute_step_direct(step, observation)
+
+        except Exception as e:
+            logger.error(f"Step execution failed: {e}")
+            return {"success": False, "error": str(e)}
+
+    def _execute_step_direct(self, step: SkillStep, observation: np.ndarray) -> Dict[str, Any]:
+        """Fallback: execute directly via EdgeSkillClient."""
         edge_client = _get_edge_client()
 
         if not edge_client:
@@ -845,12 +930,6 @@ class UnifiedSkillOrchestrator:
                 "execution_time_ms": 5.0,
             }
 
-        # Get robot's edge device
-        robot = self._robots.get(step.robot_id)
-        if not robot or not robot.edge_device_ip:
-            return {"success": False, "error": "Robot edge device not found"}
-
-        # Execute blended skills
         try:
             from src.platform.edge.skill_client import SkillBlendConfig
 
@@ -869,7 +948,7 @@ class UnifiedSkillOrchestrator:
             }
 
         except Exception as e:
-            logger.error(f"Step execution failed: {e}")
+            logger.error(f"Direct execution failed: {e}")
             return {"success": False, "error": str(e)}
 
     def increment_task_count(self, robot_id: str):
