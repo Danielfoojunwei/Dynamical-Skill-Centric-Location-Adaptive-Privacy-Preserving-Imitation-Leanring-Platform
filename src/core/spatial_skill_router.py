@@ -1,6 +1,23 @@
 """
 Dynamical.ai Spatial Skill Router
 
+DEPRECATION NOTICE:
+===================
+This module has been SUPERSEDED by unified_skill_orchestrator.py
+The UnifiedSkillOrchestrator combines:
+- MoE routing (what skill) - from moe_skill_router.py
+- Spatial routing (which robot) - from this file
+- Location adaptation (how to adapt) - from this file
+
+Use unified_skill_orchestrator.py for new code:
+    from src.core.unified_skill_orchestrator import get_orchestrator
+    orchestrator = get_orchestrator()
+    result = orchestrator.orchestrate(request)
+
+This file is kept for backwards compatibility only.
+
+Original Description:
+=====================
 This module handles location-aware skill routing and deployment:
 1. Maps cameras to workspaces (physical zones)
 2. Tracks which robots are visible in which cameras

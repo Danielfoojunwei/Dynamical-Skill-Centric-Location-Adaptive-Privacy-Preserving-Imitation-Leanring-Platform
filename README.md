@@ -89,6 +89,95 @@ The Dynamical Edge Platform is an on-device runtime and training engine for huma
 
 ---
 
+## Unified Skill Orchestration (Bottom-Up Architecture)
+
+The entire system follows a layered architecture where each layer has ONE responsibility:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                            CLOUD                                                 │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐│
+│  │  Layer 3: TASK DECOMPOSITION (async, 100ms-1s)                              ││
+│  │  Cloud LLM decomposes "pick up cube" → [locate, approach, grasp, place]     ││
+│  └─────────────────────────────────────────────────────────────────────────────┘│
+│  ┌─────────────────────────────────────────────────────────────────────────────┐│
+│  │  Layer 4: SKILL SELECTION (MoE, <10ms)                                      ││
+│  │  MoESkillRouter: task_embedding → gating network → skill_ids + weights      ││
+│  │  ONE decision: WHAT skill to use?                                           ││
+│  └─────────────────────────────────────────────────────────────────────────────┘│
+│  ┌─────────────────────────────────────────────────────────────────────────────┐│
+│  │  Layer 5: ROBOT ASSIGNMENT (Spatial, <1ms)                                  ││
+│  │  TaskRouter: strategies = NEAREST, LEAST_BUSY, CAPABILITY, ROUND_ROBIN      ││
+│  │  ONE decision: WHICH robot executes?                                        ││
+│  └─────────────────────────────────────────────────────────────────────────────┘│
+│  ┌─────────────────────────────────────────────────────────────────────────────┐│
+│  │  Layer 6: SKILL ADAPTATION (Location, <1ms)                                 ││
+│  │  LocationAdaptiveSkillManager: workspace → table_height, obstacles, etc.    ││
+│  │  ONE decision: HOW to adapt skill params?                                   ││
+│  └─────────────────────────────────────────────────────────────────────────────┘│
+│                                      │                                           │
+└──────────────────────────────────────┼───────────────────────────────────────────┘
+                                       │ SkillExecutionPlan (gRPC)
+                                       ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                            EDGE (Jetson Thor)                                    │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐│
+│  │  Layer 1: PERCEPTION (1kHz safety, 200Hz control)                           ││
+│  │  ONVIF Cameras → DINOv3/SAM3 → Robot Detection + Object Detection           ││
+│  │  Updates: RobotLocationTracker with positions                               ││
+│  └─────────────────────────────────────────────────────────────────────────────┘│
+│  ┌─────────────────────────────────────────────────────────────────────────────┐│
+│  │  Layer 2: SPATIAL AWARENESS                                                 ││
+│  │  CameraWorkspaceMapper: camera_id → workspace_ids                           ││
+│  │  RobotLocationTracker: robot_id → position, workspace, visible_cameras      ││
+│  └─────────────────────────────────────────────────────────────────────────────┘│
+│  ┌─────────────────────────────────────────────────────────────────────────────┐│
+│  │  Layer 7: EXECUTION (200Hz real-time)                                       ││
+│  │  EdgeSkillClient: download → cache → VLA inference → joint actions          ││
+│  │  Safety @ 1kHz: V-JEPA 2 + backup model (NEVER bypassed)                    ││
+│  └─────────────────────────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Unified Entry Point
+
+All skill orchestration goes through ONE function:
+
+```python
+from src.core.unified_skill_orchestrator import get_orchestrator, OrchestrationRequest
+
+orchestrator = get_orchestrator()
+result = orchestrator.orchestrate(OrchestrationRequest(
+    task_description="Pick up the red cube and place on shelf",
+    assignment_strategy=AssignmentStrategy.NEAREST,
+    target_position=np.array([1.2, 0.8, 0.8]),
+))
+
+# Result contains complete execution plan:
+# - plan.steps[]: skill_ids, weights, robot_id, workspace_id, location_params
+# - Each step has tier (REALTIME/CONTROL/PLANNING) and dependencies
+```
+
+### ONE Decision Per Layer
+
+| Layer | Question | Component | Output |
+|-------|----------|-----------|--------|
+| **4** | WHAT skill? | `MoESkillRouter.route()` | `skill_ids, weights` |
+| **5** | WHICH robot? | `TaskRouter.assign_task()` | `robot_id` |
+| **6** | HOW to adapt? | `LocationAdaptiveSkillManager` | `location_params` |
+| **7** | WHEN? | `_determine_tier()` | `ExecutionTier` |
+
+### File Organization
+
+| Component | File | Responsibility |
+|-----------|------|----------------|
+| **Unified Entry** | `src/core/unified_skill_orchestrator.py` | Single orchestration entry point |
+| **MoE Routing** | `src/platform/cloud/moe_skill_router.py` | Skill selection + encrypted storage |
+| **Edge Execution** | `src/platform/edge/skill_client.py` | Caching + execution |
+| **Skill Invoker** | `src/core/robot_skill_invoker.py` | Control loop integration |
+
+---
+
 ## Key Features
 
 ### Meta AI Foundation Models
@@ -326,11 +415,12 @@ curl -X POST http://localhost:8000/api/v1/robot/invoke_skill \
 ```
 ├── src/
 │   ├── core/                        # Core algorithms
+│   │   ├── unified_skill_orchestrator.py # UNIFIED: Single entry point for all skill orchestration
 │   │   ├── timing_architecture.py       # 4-tier timing (Thor optimized)
 │   │   ├── system_robustness.py         # Reliability & safety
 │   │   ├── meta_ai_models.py            # DINOv3, SAM3, V-JEPA 2
 │   │   ├── gmr_retargeting.py           # Motion retargeting
-│   │   └── robot_skill_invoker.py       # Unified skill invocation
+│   │   └── robot_skill_invoker.py       # Control loop skill execution
 │   │
 │   ├── platform/
 │   │   ├── jetson_thor.py               # Thor hardware config (NEW)
