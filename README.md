@@ -167,14 +167,16 @@ result = orchestrator.orchestrate(OrchestrationRequest(
 | **6** | HOW to adapt? | `LocationAdaptiveSkillManager` | `location_params` |
 | **7** | WHEN? | `_determine_tier()` | `ExecutionTier` |
 
-### File Organization
+### File Organization (Simplified)
 
-| Component | File | Responsibility |
-|-----------|------|----------------|
-| **Unified Entry** | `src/core/unified_skill_orchestrator.py` | Single orchestration entry point |
-| **MoE Routing** | `src/platform/cloud/moe_skill_router.py` | Skill selection + encrypted storage |
-| **Edge Execution** | `src/platform/edge/skill_client.py` | Caching + execution |
-| **Skill Invoker** | `src/core/robot_skill_invoker.py` | Control loop integration |
+| Layer | File | Responsibility |
+|-------|------|----------------|
+| **Entry Point** | `src/core/unified_skill_orchestrator.py` | PLAN: what/which/how/when |
+| **Execution** | `src/core/robot_skill_invoker.py` | EXECUTE: 200Hz control loop |
+| **Cloud** | `src/platform/cloud/moe_skill_router.py` | MoE gating + encrypted storage |
+| **Edge** | `src/platform/edge/skill_client.py` | Skill caching + VLA inference |
+
+**Removed**: `spatial_skill_router.py` (merged into unified_skill_orchestrator.py)
 
 ---
 

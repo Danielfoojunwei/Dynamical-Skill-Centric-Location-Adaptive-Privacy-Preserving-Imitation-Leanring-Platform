@@ -892,12 +892,8 @@ class UnifiedSkillOrchestrator:
                 observation=obs_state,
                 mode=InvocationMode.BLENDED if len(step.skill_ids) > 1 else InvocationMode.DIRECT,
                 deadline_ms=step.deadline_ms,
+                location_context=step.location_params,  # FROM orchestrator._adapt_for_location()
             )
-
-            # Inject location params into the invoker's context
-            # These params modify skill behavior for the specific location
-            if step.location_params:
-                request.location_context = step.location_params
 
             # Execute via RobotSkillInvoker (200Hz control loop)
             result = invoker.invoke(request)

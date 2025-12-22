@@ -224,9 +224,22 @@ class RobotAction:
 class SkillInvocationRequest:
     """Request to invoke a skill.
 
-    This is the unified skill invocation interface used by the Dynamical Edge Platform.
-    It accepts inputs from both local control loops and external orchestration systems
-    (SwarmBridge/SwarmBrain) via the standardized API.
+    This is the EXECUTION interface for the Dynamical Edge Platform.
+
+    Integration with UnifiedSkillOrchestrator:
+    ==========================================
+    The orchestrator handles PLANNING (what/which/how), the invoker handles EXECUTION.
+
+        Orchestrator.orchestrate()  →  SkillExecutionPlan
+                                              │
+                                              ▼
+        Orchestrator.execute_step() →  RobotSkillInvoker.invoke()
+                                              │
+                                              ▼
+                                       RobotAction @ 200Hz
+
+    When used with orchestrator, skill_ids and blend_weights are pre-computed.
+    When used standalone, set task_description for automatic MoE routing.
     """
     # Robot identification (required for multi-robot deployments)
     robot_id: Optional[str] = None              # Unique robot identifier
@@ -237,9 +250,9 @@ class SkillInvocationRequest:
     coordination_id: Optional[str] = None       # Shared ID for coordinated tasks
 
     # Task specification (one of these should be provided)
-    task_description: Optional[str] = None      # Natural language
+    task_description: Optional[str] = None      # Natural language (triggers MoE routing)
     task_embedding: Optional[np.ndarray] = None # Pre-computed embedding
-    skill_ids: Optional[List[str]] = None       # Direct skill IDs
+    skill_ids: Optional[List[str]] = None       # Direct skill IDs (from orchestrator)
 
     # Current state
     observation: Optional[ObservationState] = None
@@ -249,7 +262,10 @@ class SkillInvocationRequest:
 
     # MoE parameters
     max_skills: int = 3
-    blend_weights: Optional[List[float]] = None  # Override MoE weights
+    blend_weights: Optional[List[float]] = None  # MoE weights (from orchestrator)
+
+    # Location context (from orchestrator's location adaptation)
+    location_context: Optional[Dict[str, Any]] = None  # table_height, obstacles, etc.
 
     # Safety parameters
     check_safety: bool = True
@@ -298,14 +314,44 @@ class SkillInvocationResult:
 
 class RobotSkillInvoker:
     """
-    Skill invocation pipeline for humanoid robots.
+    Skill EXECUTION engine for humanoid robots (Layer 7).
 
-    Features:
-    - Task-based skill routing using MoE
-    - Skill blending for complex behaviors
-    - Safety pre-checks before execution
-    - Integration with robot control loop
-    - Async skill updates from cloud
+    This is the control loop execution layer that runs at 200Hz on the edge.
+    For task planning and skill selection, use UnifiedSkillOrchestrator.
+
+    Architecture:
+    =============
+    UnifiedSkillOrchestrator (Cloud/Planning)
+        │
+        │ orchestrate() → SkillExecutionPlan
+        │   - WHAT skill? (MoE routing)
+        │   - WHICH robot? (spatial routing)
+        │   - HOW to adapt? (location params)
+        │
+        ▼
+    RobotSkillInvoker (Edge/Execution) ← YOU ARE HERE
+        │
+        │ invoke() → RobotAction @ 200Hz
+        │   - Safety pre-check (1kHz, NEVER bypassed)
+        │   - Skill execution via EdgeSkillClient
+        │   - Action generation
+        │
+        ▼
+    Robot Controller
+
+    Usage:
+    ======
+    # With orchestrator (recommended):
+    orchestrator = get_orchestrator()
+    plan = orchestrator.orchestrate(request)
+    for step in plan.steps:
+        result = orchestrator.execute_step(step, observation)
+
+    # Standalone (legacy):
+    invoker = get_skill_invoker()
+    result = invoker.invoke(SkillInvocationRequest(
+        task_description="pick up the cup"  # Triggers MoE routing
+    ))
     """
 
     def __init__(
