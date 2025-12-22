@@ -50,17 +50,20 @@ from src.platform.cloud.ffm_client_real import (
     FFMClientReal,
     FFMClientConfig,
     ModelVersion,
+    SecureAggregatorReal,
 )
 
-# Re-export
 __all__ = [
-    # New unified client (recommended)
+    # Recommended (new code)
     "UnifiedModelClient",
     "BaseModelClient",
     "SkillLibraryClient",
     "BaseModelInfo",
     "SkillInfo",
     "ModelClientConfig",
+
+    # Federated learning
+    "SecureAggregatorReal",
 
     # Legacy (deprecated)
     "FFMClient",

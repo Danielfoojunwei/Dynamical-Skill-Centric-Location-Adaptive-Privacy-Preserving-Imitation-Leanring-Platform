@@ -1,17 +1,32 @@
 """
-MOAI FHE Backend - Integrates N2HE with MOAI Transformer
+MOAI FHE Backend - Unified MOAI System with FHE and PyTorch Components
 
-This module provides the bridge between the MOAI neural network compression
-and the N2HE homomorphic encryption scheme for privacy-preserving inference.
+This module provides the complete MOAI (Multi-Objective AI) system including:
+- FHE integration with N2HE for privacy-preserving inference
+- PyTorch components for neural network training
+- Transformer blocks optimized for homomorphic encryption
 
 Architecture:
 - Uses N2HE (LWE-based) for efficient linear operations (attention, MLP)
 - Uses FHEW bootstrapping for non-linear activations (ReLU, Softmax approx)
 - Supports both edge encryption and cloud inference
+- PyTorch components for local training before FHE encryption
 
 Reference:
 K.Y. Lam et al., "Efficient FHE-based Privacy-Enhanced Neural Network for
 Trustworthy AI-as-a-Service", IEEE TDSC.
+
+Usage:
+    # FHE operations (privacy-preserving inference)
+    from src.moai import MoaiFHESystem, MoaiFHEContext
+    system = MoaiFHESystem()
+    system.start()
+    system.submit_embedding("emb_001", embedding)
+
+    # PyTorch components (local training)
+    from src.moai import MoaiConfig, MoaiTransformerBlockPT, MoaiPolicy
+    config = MoaiConfig(d_model=256, n_heads=8)
+    policy = MoaiPolicy(config)
 """
 
 import numpy as np
@@ -353,6 +368,233 @@ class MoaiFHESystem:
             'encrypted_queue_size': self._encrypted_queue.qsize(),
             'context_stats': self.context.get_statistics()
         }
+
+
+# =============================================================================
+# PyTorch Components (from moai_pt.py)
+# =============================================================================
+
+# PyTorch is optional - only import if available
+try:
+    import torch
+    import torch.nn as nn
+    HAS_TORCH = True
+except ImportError:
+    HAS_TORCH = False
+    torch = None
+    nn = None
+
+
+class MoaiConfig:
+    """
+    Configuration for MOAI models.
+
+    This configuration is shared between FHE and PyTorch implementations.
+    Does not require PyTorch to be installed.
+    """
+
+    def __init__(
+        self,
+        d_model: int = 256,
+        n_heads: int = 8,
+        n_layers: int = 4,
+        max_seq_len: int = 64,
+        d_ff: int = 1024,
+        dropout: float = 0.1,
+    ):
+        self.d_model = d_model
+        self.n_heads = n_heads
+        self.n_layers = n_layers
+        self.max_seq_len = max_seq_len
+        self.d_ff = d_ff
+        self.dropout = dropout
+
+
+# PyTorch-dependent classes
+if HAS_TORCH:
+    class MoaiTransformerBlockPT(nn.Module):
+        """
+        MOAI Transformer Block implemented in PyTorch.
+
+        This block is designed to be compatible with FHE conversion:
+        - Standard attention mechanism
+        - Layer normalization for stability
+        - Feedforward network with ReLU activation
+
+        The trained weights from this block can be exported and used
+        in the FHE-based MoaiTransformerFHE for privacy-preserving inference.
+        """
+
+        def __init__(
+            self,
+            d_model: int = 256,
+            n_heads: int = 8,
+            d_ff: int = 1024,
+            dropout: float = 0.1
+        ):
+            super().__init__()
+            self.d_model = d_model
+            self.n_heads = n_heads
+
+            # Multi-head attention
+            self.attn = nn.MultiheadAttention(
+                d_model, n_heads, dropout=dropout, batch_first=True
+            )
+
+            # Layer norms
+            self.norm1 = nn.LayerNorm(d_model)
+            self.norm2 = nn.LayerNorm(d_model)
+
+            # Feedforward network
+            self.ff = nn.Sequential(
+                nn.Linear(d_model, d_ff),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.Linear(d_ff, d_model),
+                nn.Dropout(dropout),
+            )
+
+        def forward(self, x: "torch.Tensor") -> "torch.Tensor":
+            """
+            Forward pass.
+
+            Args:
+                x: Input tensor [batch, seq, d_model]
+
+            Returns:
+                Output tensor [batch, seq, d_model]
+            """
+            # Self-attention with residual
+            attn_out, _ = self.attn(x, x, x)
+            x = self.norm1(x + attn_out)
+
+            # Feedforward with residual
+            ff_out = self.ff(x)
+            x = self.norm2(x + ff_out)
+
+            return x
+
+        def export_weights_for_fhe(self) -> Dict[str, np.ndarray]:
+            """
+            Export weights for FHE inference.
+
+            Returns:
+                Dictionary of weight arrays ready for FHE quantization
+            """
+            weights = {}
+            for name, param in self.named_parameters():
+                weights[name] = param.detach().cpu().numpy()
+            return weights
+
+
+    class MoaiPolicy(nn.Module):
+        """
+        MOAI Policy Network for robot control.
+
+        Combines transformer blocks with action prediction head.
+        Designed for imitation learning and can be converted to FHE
+        for privacy-preserving deployment.
+        """
+
+        def __init__(self, config: MoaiConfig):
+            super().__init__()
+            self.config = config
+
+            # Embedding layer
+            self.embed = nn.Linear(config.d_model, config.d_model)
+
+            # Transformer blocks
+            self.transformer_blocks = nn.ModuleList([
+                MoaiTransformerBlockPT(
+                    d_model=config.d_model,
+                    n_heads=config.n_heads,
+                    d_ff=config.d_ff,
+                    dropout=config.dropout,
+                )
+                for _ in range(config.n_layers)
+            ])
+
+            # Action prediction head
+            self.action_head = nn.Sequential(
+                nn.Linear(config.d_model, config.d_model // 2),
+                nn.ReLU(),
+                nn.Linear(config.d_model // 2, 7),  # 7 DOF action
+            )
+
+        def forward(
+            self,
+            x: "torch.Tensor",
+            return_features: bool = False
+        ) -> "torch.Tensor":
+            """
+            Forward pass.
+
+            Args:
+                x: Input features [batch, seq, d_model]
+                return_features: If True, return features before action head
+
+            Returns:
+                Actions [batch, 7] or features [batch, d_model]
+            """
+            # Embed
+            x = self.embed(x)
+
+            # Transform
+            for block in self.transformer_blocks:
+                x = block(x)
+
+            # Pool (take last token)
+            features = x[:, -1, :]  # [batch, d_model]
+
+            if return_features:
+                return features
+
+            # Predict action
+            action = self.action_head(features)
+            return action
+
+        def export_for_fhe(self, ctx: MoaiFHEContext) -> MoaiTransformerFHE:
+            """
+            Export model for FHE inference.
+
+            Args:
+                ctx: FHE context for encryption
+
+            Returns:
+                FHE-compatible model with exported weights
+            """
+            fhe_model = MoaiTransformerFHE(ctx, self.config.d_model, self.config.n_heads)
+
+            # Export weights from first transformer block
+            if len(self.transformer_blocks) > 0:
+                block = self.transformer_blocks[0]
+                weights = block.export_weights_for_fhe()
+
+                # Map to FHE model
+                # Note: Real implementation would quantize and pack weights
+                # fhe_model.W_q = weights['attn.in_proj_weight'][:d_model]
+                # etc.
+
+            return fhe_model
+
+
+else:
+    # Stub classes when PyTorch not available
+    class MoaiTransformerBlockPT:
+        """Stub: PyTorch not available."""
+        def __init__(self, *args, **kwargs):
+            raise ImportError(
+                "MoaiTransformerBlockPT requires PyTorch. "
+                "Install with: pip install torch"
+            )
+
+    class MoaiPolicy:
+        """Stub: PyTorch not available."""
+        def __init__(self, *args, **kwargs):
+            raise ImportError(
+                "MoaiPolicy requires PyTorch. "
+                "Install with: pip install torch"
+            )
 
 
 # =============================================================================
