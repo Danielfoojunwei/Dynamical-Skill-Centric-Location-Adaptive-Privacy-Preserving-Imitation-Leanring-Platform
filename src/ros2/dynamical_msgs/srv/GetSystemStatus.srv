@@ -1,0 +1,6 @@
+# Get system status
+
+---
+
+bool success
+dynamical_msgs/SystemStatus status

@@ -1,0 +1,7 @@
+# Reset emergency stop
+
+---
+
+bool success
+string message
+string[] blocking_conditions  # Conditions preventing reset

@@ -1,0 +1,8 @@
+# Trigger emergency stop
+
+string reason                 # Reason for E-stop
+
+---
+
+bool success
+string message

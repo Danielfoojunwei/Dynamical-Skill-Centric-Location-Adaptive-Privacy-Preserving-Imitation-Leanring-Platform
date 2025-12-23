@@ -36,6 +36,21 @@ The Dynamical Edge Platform is an on-device runtime and training engine for huma
 - **Keyboard Shortcuts**: Global shortcuts for power users (Ctrl+S, Ctrl+R, etc.)
 - **Comprehensive Tests**: Vitest with 19+ test cases for state management
 
+### Robot Runtime Agent (v0.7.0 Preview)
+- **Deployment-Grade Architecture**: Robot-resident runtime with optional cloud
+- **Three-Tier Compute Model**: Robot CPU (1kHz) → Robot GPU (30-100Hz) → Cloud (async)
+- **Cascaded Perception**: Tiny→Medium→Giant models triggered on-demand
+- **Offline Capable**: Robot functions without cloud connectivity
+- **See**: [`docs/DEPLOYMENT_ARCHITECTURE.md`](docs/DEPLOYMENT_ARCHITECTURE.md)
+
+### ROS 2 Integration (v0.7.0)
+- **Full ROS 2 Humble/Iron Support**: Native ROS 2 nodes for all components
+- **Isaac ROS Acceleration**: TensorRT-accelerated perception via Isaac ROS
+- **Real-Time Safety Node**: C++ safety node at 1kHz with SCHED_FIFO
+- **Zero-Copy Communication**: Intra-process composition for Tier 1 nodes
+- **API Bridge**: Seamless integration between ROS 2 and FastAPI backend
+- **See**: [`src/ros2/`](src/ros2/) for ROS 2 packages
+
 ---
 
 ## Architecture Overview

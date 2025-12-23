@@ -1,0 +1,43 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>dynamical_runtime</name>
+  <version>0.7.0</version>
+  <description>ROS 2 runtime nodes for Dynamical Edge Platform - Safety, State Estimation, Actuator Control</description>
+  <maintainer email="support@dynamical.ai">Dynamical AI</maintainer>
+  <license>Proprietary</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <!-- ROS 2 core -->
+  <depend>rclcpp</depend>
+  <depend>rclcpp_components</depend>
+  <depend>rclcpp_action</depend>
+
+  <!-- Messages -->
+  <depend>std_msgs</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>trajectory_msgs</depend>
+  <depend>dynamical_msgs</depend>
+
+  <!-- Control -->
+  <depend>control_msgs</depend>
+  <depend>controller_interface</depend>
+  <depend>realtime_tools</depend>
+
+  <!-- Lifecycle -->
+  <depend>rclcpp_lifecycle</depend>
+  <depend>lifecycle_msgs</depend>
+
+  <!-- Type adaptation for zero-copy -->
+  <depend>type_adapt</depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+  <test_depend>ament_cmake_gtest</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

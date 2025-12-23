@@ -1,0 +1,21 @@
+# Execute skill with progress feedback
+
+# Goal
+string skill_id
+string parameters_json
+float64 timeout_sec
+
+---
+
+# Result
+bool success
+string message
+float64 execution_time_sec
+string result_json            # Skill-specific result data
+
+---
+
+# Feedback
+float32 progress              # 0.0 to 1.0
+string phase                  # Current execution phase
+float64 elapsed_time_sec

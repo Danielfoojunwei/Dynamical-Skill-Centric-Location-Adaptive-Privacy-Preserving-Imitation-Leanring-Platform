@@ -1,0 +1,24 @@
+# Move end-effector to target position
+
+# Goal
+geometry_msgs/Pose target_pose
+float64 max_velocity          # m/s, 0 = default
+float64 max_acceleration      # m/s^2, 0 = default
+bool linear_motion            # True = linear path, False = joint space
+float64 timeout_sec
+
+---
+
+# Result
+bool success
+string message
+geometry_msgs/Pose final_pose
+float64 position_error_m
+float64 orientation_error_rad
+
+---
+
+# Feedback
+float32 progress              # 0.0 to 1.0
+geometry_msgs/Pose current_pose
+float64 distance_remaining_m
