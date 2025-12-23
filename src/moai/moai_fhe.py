@@ -1,6 +1,33 @@
 """
 MOAI FHE Backend - Unified MOAI System with FHE and PyTorch Components
 
+██████████████████████████████████████████████████████████████████████████████
+█                                                                            █
+█  WARNING: MOAI FHE IS AN OFFLINE PROCESSING COMPONENT                     █
+█                                                                            █
+█  This module is NOT suitable for real-time inference or control loops.    █
+█                                                                            █
+█  Performance (honest numbers):                                             █
+█  - FHE attention on 512-dim: ~30 seconds                                   █
+█  - Full transformer forward pass: ~60 seconds                              █
+█  - Batch of 100 demonstrations: ~2 hours                                   █
+█                                                                            █
+█  The 10,000-100,000x slowdown vs plaintext is FUNDAMENTAL to FHE.         █
+█                                                                            █
+█  USE FOR:                                                                  █
+█  - Overnight batch processing of encrypted demonstrations                  █
+█  - Privacy-preserving skill distillation (hours latency acceptable)        █
+█  - Compliance audit on encrypted logs                                      █
+█  - Weekly analytics on encrypted fleet data                                █
+█                                                                            █
+█  DO NOT USE FOR:                                                           █
+█  - Real-time inference (impossible)                                        █
+█  - Control loop integration (violates timing contract)                     █
+█  - Online learning (latency incompatible with robotics)                    █
+█  - Anything requiring <1 second latency                                    █
+█                                                                            █
+██████████████████████████████████████████████████████████████████████████████
+
 This module provides the complete MOAI (Multi-Objective AI) system including:
 - FHE integration with N2HE for privacy-preserving inference
 - PyTorch components for neural network training
@@ -17,13 +44,14 @@ K.Y. Lam et al., "Efficient FHE-based Privacy-Enhanced Neural Network for
 Trustworthy AI-as-a-Service", IEEE TDSC.
 
 Usage:
-    # FHE operations (privacy-preserving inference)
+    # FHE operations (privacy-preserving OFFLINE inference)
     from src.moai import MoaiFHESystem, MoaiFHEContext
     system = MoaiFHESystem()
     system.start()
+    # NOTE: This is for BATCH processing, not real-time
     system.submit_embedding("emb_001", embedding)
 
-    # PyTorch components (local training)
+    # PyTorch components (local training - this is fast)
     from src.moai import MoaiConfig, MoaiTransformerBlockPT, MoaiPolicy
     config = MoaiConfig(d_model=256, n_heads=8)
     policy = MoaiPolicy(config)
@@ -36,17 +64,30 @@ import queue
 from typing import List, Optional, Dict, Any
 from dataclasses import dataclass
 
-from .n2he import (
-    N2HEContext, 
-    N2HEParams,
-    N2HE_128,
-    KeyGenerator, 
-    Encryptor, 
-    Decryptor, 
-    Evaluator, 
-    Ciphertext,
-    LWECiphertext
-)
+try:
+    from .n2he import (
+        N2HEContext,
+        N2HEParams,
+        N2HE_128,
+        KeyGenerator,
+        Encryptor,
+        Decryptor,
+        Evaluator,
+        Ciphertext,
+        LWECiphertext
+    )
+except ImportError:
+    from src.moai.n2he import (
+        N2HEContext,
+        N2HEParams,
+        N2HE_128,
+        KeyGenerator,
+        Encryptor,
+        Decryptor,
+        Evaluator,
+        Ciphertext,
+        LWECiphertext
+    )
 
 
 @dataclass
@@ -73,15 +114,60 @@ class MoaiFHEContext:
     """
     FHE context for MOAI transformer operations.
 
+    ██████████████████████████████████████████████████████████████████████████
+    █ WARNING: OFFLINE ONLY - NOT FOR REAL-TIME USE                          █
+    █                                                                         █
+    █ Performance: ~60 seconds per forward pass                               █
+    █ Use case: Batch processing, overnight analytics, compliance audits      █
+    ██████████████████████████████████████████████████████████████████████████
+
     Provides:
     - Column-packed matrix encryption (for attention)
     - Linear combination (for MLP layers)
     - Optional bootstrapping (for activations)
+
+    NOT suitable for:
+    - Control loops (requires <10ms latency)
+    - Real-time inference (requires <100ms latency)
+    - Online learning (requires <1s latency)
     """
 
-    def __init__(self, config: MoaiFHEConfig = None, use_mock: bool = False):
+    # Class-level tracking for runtime guard
+    _realtime_rejection_count = 0
+    _last_rejection_warning = 0.0
+
+    def __init__(
+        self,
+        config: MoaiFHEConfig = None,
+        use_mock: bool = False,
+        allow_realtime: bool = False,  # MUST be False for production
+    ):
+        """
+        Initialize MOAI FHE context.
+
+        Args:
+            config: FHE configuration
+            use_mock: Use mock encryption (for testing)
+            allow_realtime: If False (default), warns on rapid sequential calls.
+                           Set to True ONLY for benchmarking/testing.
+        """
         self.config = config or MoaiFHEConfig(use_mock=use_mock)
-        
+        self._allow_realtime = allow_realtime
+        self._last_call_time = 0.0
+        self._call_count = 0
+        self._warned_about_realtime = False
+
+        # Warn if someone tries to enable realtime mode
+        if allow_realtime:
+            import warnings
+            warnings.warn(
+                "MOAI FHE: allow_realtime=True is for testing only. "
+                "FHE cannot achieve real-time performance (~60s per forward pass). "
+                "Do NOT use in production control loops.",
+                RuntimeWarning,
+                stacklevel=2
+            )
+
         # Create N2HE context
         params = N2HEParams(
             n=self.config.lwe_dimension,

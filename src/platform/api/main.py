@@ -1305,6 +1305,289 @@ async def get_perception_tflops():
     }
 
 
+# =============================================================================
+# Defensive Architecture API (v0.7.1)
+# =============================================================================
+# These endpoints provide access to the defensive components:
+# - Safety Shield: Deterministic safety checks (no ML dependency)
+# - Skill Blender: Stable multi-skill blending with guarantees
+# - Timing Contracts: Performance metrics for each tier
+
+from src.core.skill_blender import SkillBlender, BlendConfig, SkillOutput, ActionSpace as BlenderActionSpace
+from src.robot_runtime.safety_shield import SafetyShield, SafetyStatus
+from src.robot_runtime.config import SafetyConfig
+
+# Initialize defensive components
+_safety_shield = None
+_skill_blender = None
+
+
+def get_safety_shield() -> SafetyShield:
+    """Get or initialize safety shield."""
+    global _safety_shield
+    if _safety_shield is None:
+        config = SafetyConfig()
+        _safety_shield = SafetyShield(rate_hz=1000, config=config)
+        _safety_shield.initialize()
+    return _safety_shield
+
+
+def get_skill_blender() -> SkillBlender:
+    """Get or initialize skill blender."""
+    global _skill_blender
+    if _skill_blender is None:
+        config = BlendConfig(
+            confidence_threshold=0.3,
+            max_action_delta_per_second=2.0,
+            enable_jerk_limiting=True,
+            enable_confidence_weighting=True,
+        )
+        _skill_blender = SkillBlender(config=config, action_dim=7)
+        _skill_blender.register_skill("default", BlenderActionSpace.JOINT_POSITION, action_dim=7)
+    return _skill_blender
+
+
+class SafetyCheckRequest(BaseModel):
+    """Request for safety check."""
+    joint_positions: List[float]
+    joint_velocities: List[float]
+    joint_torques: Optional[List[float]] = None
+    obstacles: Optional[List[Dict[str, Any]]] = None
+    humans: Optional[List[Dict[str, Any]]] = None
+
+
+class SkillBlendRequest(BaseModel):
+    """Request for skill blending."""
+    actions: List[List[float]]  # List of action vectors
+    confidences: List[float]
+    weights: List[float]
+    skill_ids: Optional[List[str]] = None
+    dt: float = 0.01
+
+
+@app.post("/api/v1/safety/check", dependencies=[Depends(get_api_key)])
+async def safety_check(request: SafetyCheckRequest):
+    """
+    Perform deterministic safety check.
+
+    This endpoint uses HARD-CODED limits from robot specification.
+    ML predictions are INFORMATIONAL ONLY and cannot override safety.
+
+    Returns:
+        is_safe: Whether all checks passed
+        status: Current safety status
+        violations: List of any violations detected
+        check_time_us: Time taken for check (should be <500μs)
+    """
+    try:
+        shield = get_safety_shield()
+
+        robot_state = {
+            'joint_positions': np.array(request.joint_positions),
+            'joint_velocities': np.array(request.joint_velocities),
+        }
+
+        if request.joint_torques:
+            robot_state['joint_torques'] = np.array(request.joint_torques)
+        if request.obstacles:
+            robot_state['obstacles'] = request.obstacles
+        if request.humans:
+            robot_state['humans'] = request.humans
+
+        shield.heartbeat()
+        is_safe, override_action = shield.check(robot_state)
+
+        return {
+            "is_safe": is_safe,
+            "status": shield.state.status.value,
+            "violations": [
+                {
+                    "type": v.type,
+                    "severity": v.severity.value,
+                    "joint": v.joint,
+                    "value": v.value,
+                    "limit": v.limit,
+                    "message": v.message,
+                }
+                for v in shield.state.violations
+            ],
+            "estop_active": shield.state.estop_active,
+            "check_time_us": shield.state.last_check_time_us,
+            "override_action": override_action.tolist() if override_action is not None else None,
+            "ml_advisory": {
+                "collision_warning": shield.state.ml_collision_warning,
+                "collision_probability": shield.state.ml_collision_probability,
+                "speed_reduction_factor": shield.state.ml_speed_reduction_factor,
+                "note": "ML advisories are INFORMATIONAL ONLY - cannot override deterministic safety"
+            }
+        }
+    except Exception as e:
+        logger.error(f"Safety check error: {e}")
+        return {"is_safe": False, "error": str(e)}
+
+
+@app.post("/api/v1/safety/estop", dependencies=[Depends(get_api_key)])
+async def trigger_estop():
+    """Trigger emergency stop."""
+    shield = get_safety_shield()
+    shield.trigger_estop()
+    return {"success": True, "status": "estop", "message": "E-stop triggered"}
+
+
+@app.post("/api/v1/safety/reset", dependencies=[Depends(get_api_key)])
+async def reset_estop():
+    """Reset emergency stop (requires all violations cleared)."""
+    shield = get_safety_shield()
+    success = shield.reset_estop()
+    return {
+        "success": success,
+        "status": shield.state.status.value,
+        "message": "E-stop reset" if success else "Cannot reset - violations remain"
+    }
+
+
+@app.get("/api/v1/safety/stats", dependencies=[Depends(get_api_key)])
+async def get_safety_stats():
+    """Get safety shield statistics."""
+    shield = get_safety_shield()
+    stats = shield.get_statistics()
+    return {
+        **stats,
+        "architecture_note": "Safety uses DETERMINISTIC checks only. ML is advisory.",
+        "timing_contract": {
+            "target_hz": 1000,
+            "max_check_time_us": 500,
+            "actual_avg_us": stats.get("avg_check_time_us", 0),
+            "actual_max_us": stats.get("max_check_time_us", 0),
+        }
+    }
+
+
+@app.post("/api/v1/skills/blend", dependencies=[Depends(get_api_key)])
+async def blend_skills(request: SkillBlendRequest):
+    """
+    Blend multiple skill outputs with stability guarantees.
+
+    Guarantees:
+    1. All actions normalized to [-1, 1]
+    2. Confidence-weighted blending
+    3. Jerk limiting for smooth transitions
+    4. Safe default on low confidence
+
+    Returns:
+        blended_action: The blended action vector
+        adjusted_weights: Weights after confidence adjustment
+        stability_info: Information about stability measures applied
+    """
+    try:
+        blender = get_skill_blender()
+
+        # Create skill outputs
+        outputs = []
+        for i, (action, confidence) in enumerate(zip(request.actions, request.confidences)):
+            skill_id = request.skill_ids[i] if request.skill_ids and i < len(request.skill_ids) else "default"
+
+            # Ensure skill is registered
+            if skill_id not in blender._registered_skills:
+                blender.register_skill(skill_id, BlenderActionSpace.JOINT_POSITION, action_dim=len(action))
+
+            outputs.append(SkillOutput(
+                action=np.array(action, dtype=np.float32),
+                confidence=confidence,
+                skill_id=skill_id,
+                action_space=BlenderActionSpace.JOINT_POSITION,
+            ))
+
+        result = blender.blend(outputs, request.weights, dt=request.dt)
+
+        return {
+            "success": not result.used_safe_default,
+            "blended_action": result.action.tolist(),
+            "original_weights": result.original_weights,
+            "adjusted_weights": result.adjusted_weights,
+            "skill_ids": result.skill_ids,
+            "total_confidence": result.total_confidence,
+            "stability_info": {
+                "used_safe_default": result.used_safe_default,
+                "jerk_limited": result.jerk_limited,
+                "clipping_applied": result.clipping_applied,
+            },
+            "blend_time_ms": result.blend_time_ms,
+        }
+    except Exception as e:
+        logger.error(f"Skill blend error: {e}")
+        return {"success": False, "error": str(e)}
+
+
+@app.get("/api/v1/skills/blender/stats", dependencies=[Depends(get_api_key)])
+async def get_blender_stats():
+    """Get skill blender statistics."""
+    blender = get_skill_blender()
+    return blender.get_statistics()
+
+
+@app.post("/api/v1/skills/blender/reset", dependencies=[Depends(get_api_key)])
+async def reset_blender():
+    """Reset skill blender temporal state (for new episode)."""
+    blender = get_skill_blender()
+    blender.reset_state()
+    return {"success": True, "message": "Blender state reset"}
+
+
+@app.get("/api/v1/timing/contract", dependencies=[Depends(get_api_key)])
+async def get_timing_contract():
+    """
+    Get the system timing contract.
+
+    This documents what runs at each tier with timing guarantees.
+    """
+    return {
+        "version": "0.7.1",
+        "tiers": {
+            "tier0_safety": {
+                "rate_hz": 1000,
+                "max_latency_us": 500,
+                "components": ["SafetyShield", "JointLimits", "CollisionCheck"],
+                "constraints": [
+                    "CPU-only (no GPU)",
+                    "No network calls",
+                    "No heap allocation after init",
+                    "No ML model inference",
+                    "Deterministic execution time"
+                ]
+            },
+            "tier1_control": {
+                "rate_hz": 100,
+                "max_latency_ms": 5,
+                "components": ["StateEstimation", "PolicyInference", "SkillBlender"],
+                "constraints": [
+                    "Cached TensorRT only",
+                    "No model loading",
+                    "No network dependency"
+                ]
+            },
+            "tier2_perception": {
+                "rate_hz": "10-30",
+                "max_latency_ms": 100,
+                "components": ["CascadedPerception", "ObjectDetection", "Segmentation"],
+                "model_strategy": {
+                    "level1": {"models": ["MobileNetV4", "YOLO-NAS-S"], "always_running": True},
+                    "level2": {"models": ["DINOv2-B", "SAM2"], "trigger": "confidence < 0.7"},
+                    "level3": {"models": ["DINOv2-G", "V-JEPA 2"], "trigger": "human detected or L2 failure"}
+                }
+            },
+            "tier3_cloud": {
+                "rate_hz": "async",
+                "latency": "seconds to hours",
+                "components": ["TelemetryUpload", "SkillSync", "MOAI_FHE"],
+                "note": "MOAI FHE is OFFLINE ONLY (~60s per forward pass)"
+            }
+        },
+        "network_failure_behavior": "Robot continues indefinitely with cached skills and local perception",
+        "ml_safety_note": "ML predictions are ADVISORY ONLY. Safety shield uses deterministic checks."
+    }
+
+
 # --- Static Files (Production) ---
 # Mount static assets if they exist (for production build)
 # MOVED TO END TO AVOID SHADOWING API ROUTES

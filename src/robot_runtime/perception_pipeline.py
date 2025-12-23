@@ -14,7 +14,10 @@ from enum import Enum
 from typing import Dict, Any, List, Optional
 import numpy as np
 
-from .config import PerceptionConfig
+try:
+    from .config import PerceptionConfig
+except ImportError:
+    from src.robot_runtime.config import PerceptionConfig
 
 logger = logging.getLogger(__name__)
 

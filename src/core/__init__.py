@@ -27,7 +27,7 @@ Usage:
 """
 
 # Configuration
-from .config_loader import config, ConfigLoader, get_config
+from .config_loader import config, load_and_validate_config as get_config
 
 # Human state representation
 from .human_state import HumanState, EnvObject, DexterHandState
@@ -78,7 +78,6 @@ from . import pose_inference
 __all__ = [
     # Configuration
     'config',
-    'ConfigLoader',
     'get_config',
 
     # Human state
