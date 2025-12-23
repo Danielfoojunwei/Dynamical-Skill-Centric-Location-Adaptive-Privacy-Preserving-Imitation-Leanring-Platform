@@ -36,6 +36,13 @@ The Dynamical Edge Platform is an on-device runtime and training engine for huma
 - **Keyboard Shortcuts**: Global shortcuts for power users (Ctrl+S, Ctrl+R, etc.)
 - **Comprehensive Tests**: Vitest with 19+ test cases for state management
 
+### Robot Runtime Agent (v0.7.0 Preview)
+- **Deployment-Grade Architecture**: Robot-resident runtime with optional cloud
+- **Three-Tier Compute Model**: Robot CPU (1kHz) → Robot GPU (30-100Hz) → Cloud (async)
+- **Cascaded Perception**: Tiny→Medium→Giant models triggered on-demand
+- **Offline Capable**: Robot functions without cloud connectivity
+- **See**: [`docs/DEPLOYMENT_ARCHITECTURE.md`](docs/DEPLOYMENT_ARCHITECTURE.md)
+
 ---
 
 ## Architecture Overview
