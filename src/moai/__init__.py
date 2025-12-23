@@ -6,13 +6,22 @@ for privacy-preserving edge-to-cloud inference.
 
 Components:
 - n2he: Neural Network Homomorphic Encryption (LWE-based, post-quantum secure)
-- moai_fhe: MOAI-FHE integration for encrypted transformer inference
-- moai_pt: PyTorch MOAI transformer implementation
+- moai_fhe: MOAI-FHE integration and PyTorch components for encrypted transformer inference
 
 Reference:
 K.Y. Lam et al., "Efficient FHE-based Privacy-Enhanced Neural Network for
 Trustworthy AI-as-a-Service", IEEE TDSC.
 https://github.com/HintSight-Technology/N2HE-hexl
+
+Usage:
+    # FHE operations
+    from src.moai import MoaiFHESystem, MoaiFHEContext
+    system = MoaiFHESystem()
+
+    # PyTorch components (optional, requires torch)
+    from src.moai import MoaiConfig, MoaiPolicy
+    config = MoaiConfig(d_model=256)
+    policy = MoaiPolicy(config)
 """
 
 # Core N2HE (always available)
@@ -31,27 +40,25 @@ from .n2he import (
     Ciphertext,
 )
 
-# MOAI FHE (always available)
+# MOAI FHE and PyTorch components (unified module)
 from .moai_fhe import (
+    # FHE components
     MoaiFHEContext,
     MoaiFHEConfig,
     MoaiFHESystem,
     MoaiTransformerFHE,
+    # PyTorch components (config always available)
+    MoaiConfig,
+    MoaiTransformerBlockPT,
+    MoaiPolicy,
 )
 
-# PyTorch components (optional - requires torch)
+# Check if PyTorch is available
 try:
-    from .moai_pt import (
-        MoaiConfig,
-        MoaiPolicy,
-        MoaiTransformerBlockPT,
-    )
+    import torch
     HAS_TORCH = True
 except ImportError:
     HAS_TORCH = False
-    MoaiConfig = None
-    MoaiPolicy = None
-    MoaiTransformerBlockPT = None
 
 __all__ = [
     # N2HE core
