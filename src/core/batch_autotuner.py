@@ -22,7 +22,10 @@ except ImportError:
 # We will adapt the type hinting to be more generic or rely on duck typing for now, 
 # but we need to import MemoryMonitor.
 
-from core.memory_monitor import MemoryMonitor, OutOfMemoryError
+try:
+    from .memory_monitor import MemoryMonitor, OutOfMemoryError
+except ImportError:
+    from src.core.memory_monitor import MemoryMonitor, OutOfMemoryError
 
 logger = logging.getLogger(__name__)
 
