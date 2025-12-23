@@ -1,8 +1,10 @@
-# Dynamical Edge Platform v0.5.0
+# Dynamical Edge Platform v0.6.0
 
-![Version](https://img.shields.io/badge/version-0.5.0-blue)
+![Version](https://img.shields.io/badge/version-0.6.0-blue)
 ![Status](https://img.shields.io/badge/status-Production-green)
 ![License](https://img.shields.io/badge/license-Proprietary-red)
+![React](https://img.shields.io/badge/React-18.3-61DAFB)
+![Python](https://img.shields.io/badge/Python-3.8+-3776AB)
 
 > **On-Device Runtime and Training Engine for Humanoid Robots with Meta AI Foundation Models**
 
@@ -14,11 +16,25 @@ The Dynamical Edge Platform is an on-device runtime and training engine for huma
 - **Giant Model Support** - DINOv3 ViT-G, SAM3 Huge, V-JEPA 2 Giant
 - **Redundant Safety** - Multi-model ensemble with human intent prediction
 
-### Key Features
-- **Meta AI Foundation Models**: DINOv3, SAM3, V-JEPA 2 for state-of-the-art perception
-- **Mixture-of-Experts (MoE) Skill Architecture** with privacy-preserving federated learning
-- **NVIDIA Isaac Lab Integration** for sim-to-real transfer
-- **128-bit FHE Encryption** for secure gradient aggregation
+---
+
+## What's New in v0.6.0
+
+### Backend Consolidation
+- **Unified Observability**: Merged TraceManager, RootCauseAnalyzer, and FHEAuditor into single `observability.py`
+- **Consolidated MOAI**: Combined PyTorch and FHE implementations into unified `moai_fhe.py`
+- **Clean Module Exports**: Added `__init__.py` files across all major packages for cleaner imports
+- **Simplified Architecture**: Reduced code duplication while maintaining all functionality
+
+### Modern Frontend (React 18.3)
+- **Zustand State Management**: Reactive stores for system, robot, and UI state
+- **React Router v7**: SPA navigation with lazy-loaded routes
+- **React Three Fiber**: 3D robot visualization with safety zones
+- **Radix UI Components**: Accessible toast notifications and dialogs
+- **TanStack React Query**: Server state management with caching
+- **Enhanced WebSocket**: Exponential backoff reconnection, heartbeat monitoring
+- **Keyboard Shortcuts**: Global shortcuts for power users (Ctrl+S, Ctrl+R, etc.)
+- **Comprehensive Tests**: Vitest with 19+ test cases for state management
 
 ---
 
@@ -89,7 +105,7 @@ The Dynamical Edge Platform is an on-device runtime and training engine for huma
 
 ---
 
-## Unified Skill Orchestration (Bottom-Up Architecture)
+## Unified Skill Orchestration (7-Layer Architecture)
 
 The entire system follows a layered architecture where each layer has ONE responsibility:
 
@@ -167,17 +183,6 @@ result = orchestrator.orchestrate(OrchestrationRequest(
 | **6** | HOW to adapt? | `LocationAdaptiveSkillManager` | `location_params` |
 | **7** | WHEN? | `_determine_tier()` | `ExecutionTier` |
 
-### File Organization (Simplified)
-
-| Layer | File | Responsibility |
-|-------|------|----------------|
-| **Entry Point** | `src/core/unified_skill_orchestrator.py` | PLAN: what/which/how/when |
-| **Execution** | `src/core/robot_skill_invoker.py` | EXECUTE: 200Hz control loop |
-| **Cloud** | `src/platform/cloud/moe_skill_router.py` | MoE gating + encrypted storage |
-| **Edge** | `src/platform/edge/skill_client.py` | Skill caching + VLA inference |
-
-**Removed**: `spatial_skill_router.py` (merged into unified_skill_orchestrator.py)
-
 ---
 
 ## Key Features
@@ -194,10 +199,31 @@ State-of-the-art perception powered by Meta's latest foundation models with FP4 
 
 **Meta AI Total: 650.0 FP4 TFLOPS (31% of compute budget)**
 
-All models include privacy-preserving wrappers for federated learning:
-- Differential privacy for feature extraction
-- Secure aggregation for model updates
-- Audit logging for compliance
+### Unified Observability System (v0.6.0)
+
+Consolidated observability with single import:
+
+```python
+from src.platform.observability import (
+    get_observability_system,
+    TraceManager,
+    RootCauseAnalyzer,
+    FHEAuditor
+)
+
+# Initialize unified observability
+obs = get_observability_system()
+
+# Trace recording
+obs.trace_manager.start_trace("skill_execution")
+obs.trace_manager.add_event("inference", {"model": "pi0", "latency_ms": 4.2})
+
+# Root cause analysis
+analysis = obs.root_cause_analyzer.analyze_failure(error_trace)
+
+# FHE auditing
+obs.fhe_auditor.log_encryption("gradient_update", metadata)
+```
 
 ### NVIDIA Isaac Lab Simulation
 
@@ -207,153 +233,17 @@ Sim-to-real transfer with high-fidelity physics simulation:
 - Parallel environment training
 - Direct deployment to Jetson hardware
 
-### Unified Skill Invocation API
-
-Single API for all skill execution, supporting both autonomous operation and coordinated multi-robot scenarios:
-
-```python
-POST /api/v1/robot/invoke_skill
-{
-    "robot_id": "thor_001",
-    "role": "leader",           # leader, follower, observer, independent, assistant
-    "goal": "pick up the cup",
-    "coordination_id": "task_123",
-    "skill_ids": ["grasp_v2", "pour_v1"],
-    "mode": "blended",
-    "max_skills": 3
-}
-```
-
 ### MoE Skill Architecture
 - **Frozen Base VLA Models**: Pi0/OpenVLA-7B remain read-only (IP-safe)
 - **Trainable Skill Experts**: Lightweight skills that augment base models
 - **Dynamic Task Routing**: Natural language → automatic skill selection
 - **Skill Blending**: Combine multiple skills with MoE routing weights
 
-### Shared Crypto Library
-Unified FHE interface used by both edge and cloud components:
-
-```python
-from src.shared.crypto import create_fhe_backend
-
-# Auto-selects best available backend
-backend = create_fhe_backend()
-
-# Encrypt gradients for federated learning
-encrypted = backend.encrypt(gradients)
-
-# Homomorphic aggregation (server-side)
-aggregated = backend.homomorphic_sum([enc1, enc2, enc3])
-```
-
-### Coordination Metadata Support
-Skills include coordination metadata for SwarmBridge integration:
-
-```python
-@dataclass
-class CoordinationMetadata:
-    supported_roles: List[str]     # ["leader", "follower"]
-    requires_leader: bool          # True for coordinated skills
-    sync_mode: str                 # "none", "loose", "strict", "realtime"
-    min_robots: int
-    max_robots: int
-```
-
 ### 4-Tier Timing Architecture (Jetson Thor + FP4)
 - **Tier 1**: Safety Loop @ 1kHz (V-JEPA 2 Giant + backup model, never throttled)
 - **Tier 2**: Control/Perception @ 200Hz (5ms - UPGRADED with FP4 quantization!)
 - **Tier 3**: Learning Loop @ 10Hz (IL training, skill distillation)
 - **Tier 4**: Background (anomaly detection, FL aggregation)
-
-### Compute Budget by Precision
-
-**Jetson Thor Blackwell Architecture:**
-| Precision | TFLOPS | Use Case |
-|-----------|--------|----------|
-| **FP4/INT4** | 2070 | Quantized inference (primary) |
-| **FP8** | 275 | Mixed precision |
-| **FP16** | 137 | Training, high-precision inference |
-| **FP32** | 68 | Gradient computation |
-
-### Dynamic Compute Scaling (2070 FP4 TFLOPS)
-
-Compute scales dynamically with connected peripherals and active skills:
-
-#### Fixed Allocations (750 TFLOPS - Always Reserved)
-| Component | TFLOPS | Purpose |
-|-----------|--------|---------|
-| **Safety V-JEPA 2 Giant** | 150 | Collision prediction @ 1kHz |
-| **Safety Ensemble** | 100 | Multi-model safety |
-| **Safety Backup** | 100 | Redundant safety model |
-| **Force/Torque Prediction** | 50 | Predictive force limiting |
-| **Core VLA + ACT** | 80 | Base action models |
-| **Learning Pipeline** | 170 | IL, MOAI, distillation |
-| **Background** | 100 | Anomaly, spatial, FHE |
-| **FIXED TOTAL** | **750** | Always allocated |
-
-#### Per-Peripheral Scaling (1320 TFLOPS Available)
-| Peripheral | TFLOPS Each | Components |
-|------------|-------------|------------|
-| **ONVIF Camera** | 60.0 | DINOv3 (15) + SAM3 (25) + Depth (10) + Pose (7.5) + Fusion (2.5) |
-| **Glove (DYGlove/MANUS)** | 30.0 | Retargeting (15) + Haptics (5) + Grasp Planning (10) |
-
-#### Maximum Peripherals Per Jetson Thor
-| Configuration | Cameras | Gloves | Compute Used | Headroom |
-|---------------|---------|--------|--------------|----------|
-| **Minimal** | 4 | 2 | 990 TFLOPS | 1080 |
-| **Recommended** | 12 | 2 | 1470 TFLOPS | 600 |
-| **Maximum** | 22 | 4 | 1870 TFLOPS | 200 |
-
-```
-Maximum Cameras: 22  (at 60 TFLOPS each)
-Maximum Gloves:  4   (2 pairs, left+right)
-```
-
-### Skill Execution Model (Hybrid Edge/Cloud)
-
-**Not all skills run on Jetson Thor.** Skills are split by latency requirements:
-
-| Location | Latency | Skill Type | Examples |
-|----------|---------|------------|----------|
-| **On-Device** | <5ms | Real-time control @ 200Hz | Grasping, locomotion, reactive behaviors |
-| **Cloud** | 100ms-1s | Planning & reasoning | Task decomposition, skill selection, LLM planning |
-
-#### On-Device Skills (Use TFLOPS Budget)
-Only skills requiring real-time control consume on-device compute:
-- **Base skill**: 20 TFLOPS each
-- **Large manipulation skill**: 50 TFLOPS each
-- **Max concurrent**: 4 real-time skills
-
-#### Cloud Skills (FREE - No On-Device Compute)
-Planning and reasoning skills run in cloud:
-- Task decomposition and goal planning
-- Skill discovery and MoE routing
-- Natural language understanding
-- Long-horizon prediction
-
-```
-Real-time skills: On-device (20-50 TFLOPS each, max 4 concurrent)
-Planning skills:  Cloud (unlimited, 100ms-1s latency acceptable)
-Skill cache:      100 skills pre-loaded for quick activation
-```
-
-#### VLA Boost (On-Demand)
-| Capability | TFLOPS | When Activated |
-|------------|--------|----------------|
-| **OpenVLA 7B** | +150 | Complex manipulation tasks |
-| **World Model Boost** | +100 | Long-horizon planning |
-| **Physics Prediction** | +60 | Contact-rich tasks |
-| **Human Intent** | +50 | Human-robot interaction |
-
-### FP16 Training Budget (137 TFLOPS)
-
-| Component | TFLOPS | Purpose |
-|-----------|--------|---------|
-| **Gradient Computation** | 60 | Backpropagation |
-| **Optimizer + Loss** | 45 | Adam/AdamW, cross-entropy |
-| **Validation + Reserve** | 32 | Model evaluation, spikes |
-
-> **Key Insight**: Dynamic scaling allows the system to grow from 4 cameras to 22 cameras, and from 2 gloves to 4 gloves, while maintaining safety guarantees. Compute is allocated on-demand as peripherals connect.
 
 ### Privacy-Preserving Learning
 - **TenSEAL/N2HE**: 128-bit homomorphic encryption for gradients
@@ -370,7 +260,7 @@ Skill cache:      100 skills pre-loaded for quick activation
 | **Storage** | 500GB NVMe SSD | Training data, skill cache |
 | **Memory** | 128GB LPDDR5X Unified | Giant VLA models, full perception |
 | **Network** | Ethernet / Wi-Fi 6E | Cloud sync, device comms |
-| **Cameras** | ONVIF IP cameras (up to 12) | Multi-view perception |
+| **Cameras** | ONVIF IP cameras (up to 22) | Multi-view perception |
 | **Gloves** | DYGlove 21-DOF haptic | Teleoperation input |
 | **Robot** | Daimon VTLA or compatible | Humanoid control |
 
@@ -390,12 +280,18 @@ python -m src.platform.api.database init
 ### 2. Start the Platform
 
 ```bash
+# Start backend API
 python -m src.platform.api.main
+
+# Start frontend (development)
+cd src/platform/ui
+npm install
+npm run dev
 ```
 
 ### 3. Access Dashboard
 
-Open: `http://localhost:8000`
+Open: `http://localhost:5173` (Vite dev server) or `http://localhost:8000` (production)
 
 ### 4. Invoke a Skill
 
@@ -416,30 +312,137 @@ curl -X POST http://localhost:8000/api/v1/robot/invoke_skill \
 
 ```
 ├── src/
-│   ├── core/                        # Core algorithms
-│   │   ├── unified_skill_orchestrator.py # UNIFIED: Single entry point for all skill orchestration
-│   │   ├── timing_architecture.py       # 4-tier timing (Thor optimized)
-│   │   ├── system_robustness.py         # Reliability & safety
-│   │   ├── meta_ai_models.py            # DINOv3, SAM3, V-JEPA 2
-│   │   ├── gmr_retargeting.py           # Motion retargeting
-│   │   └── robot_skill_invoker.py       # Control loop skill execution
+│   ├── core/                           # Core algorithms
+│   │   ├── __init__.py                     # v0.6.0: Clean exports
+│   │   ├── unified_skill_orchestrator.py   # UNIFIED: Single entry point
+│   │   ├── timing_architecture.py          # 4-tier timing (Thor optimized)
+│   │   ├── system_robustness.py            # Reliability & safety
+│   │   ├── meta_ai_models.py               # DINOv3, SAM3, V-JEPA 2
+│   │   ├── gmr_retargeting.py              # Motion retargeting
+│   │   └── robot_skill_invoker.py          # Control loop skill execution
+│   │
+│   ├── moai/                           # MOAI Architecture
+│   │   └── moai_fhe.py                     # v0.6.0: Unified FHE + PyTorch
 │   │
 │   ├── platform/
-│   │   ├── jetson_thor.py               # Thor hardware config (NEW)
-│   │   ├── api/                         # REST API (FastAPI)
-│   │   ├── cloud/                       # FL, MoE routing
-│   │   ├── edge/                        # Edge components
-│   │   └── ui/                          # React dashboard
+│   │   ├── jetson_thor.py                  # Thor hardware config
+│   │   ├── api/                            # REST API (FastAPI)
+│   │   ├── cloud/                          # FL, MoE routing
+│   │   │   ├── __init__.py                     # v0.6.0: Clean exports
+│   │   │   ├── ffm_client.py                   # Federated learning client
+│   │   │   └── moe_skill_router.py             # MoE gating network
+│   │   ├── edge/                           # Edge components
+│   │   ├── observability/                  # v0.6.0: Unified observability
+│   │   │   └── observability.py                # TraceManager + RCA + FHE Audit
+│   │   └── ui/                             # v0.6.0: Modern React dashboard
 │   │
-│   ├── drivers/                     # Hardware interfaces
-│   │   ├── dyglove.py                   # WiFi 6E haptic gloves
-│   │   ├── onvif_ptz.py                 # PTZ camera control
-│   │   └── daimon_vtla.py               # Robot driver
+│   ├── drivers/                        # Hardware interfaces
+│   │   ├── __init__.py                     # v0.6.0: Clean exports
+│   │   ├── dyglove.py                      # WiFi 6E haptic gloves
+│   │   ├── onvif_ptz.py                    # PTZ camera control
+│   │   └── daimon_vtla.py                  # Robot driver
 │   │
-│   └── shared/crypto/              # FHE (128-bit security)
+│   ├── pipeline/                       # Data pipeline
+│   │   └── __init__.py                     # v0.6.0: Clean exports
+│   │
+│   ├── spatial_intelligence/           # Pi0 VLA Models
+│   │   ├── __init__.py                     # v0.6.0: Clean exports
+│   │   └── pi0/
+│   │       └── __init__.py                     # Pi0 model exports
+│   │
+│   └── shared/crypto/                  # FHE (128-bit security)
 │
-├── config/config.yaml              # System configuration
-└── tests/                          # Test suite
+├── config/config.yaml                  # System configuration
+└── tests/                              # Test suite
+```
+
+---
+
+## Frontend Architecture (v0.6.0)
+
+The React dashboard has been completely modernized with a component-based architecture:
+
+### State Management (Zustand)
+
+```javascript
+// Three reactive stores for separation of concerns
+import { useSystemStore, useRobotStore, useUIStore } from './stores';
+
+// System state (status, TFLOPS, memory, models)
+const { status, tflopsUsage, metaAIModels } = useSystemStore();
+
+// Robot state (joints, pose, teleoperation, recording)
+const { joints, eePose, startTeleop, stopRecording } = useRobotStore();
+
+// UI state (theme, toasts, notifications)
+const { theme, showToast, toggleTheme } = useUIStore();
+```
+
+### Component Hierarchy
+
+```
+App.jsx
+├── Providers (QueryClient, Router, Toast)
+├── Routes
+│   ├── /dashboard      → Dashboard (lazy)
+│   ├── /devices        → DeviceManager (lazy)
+│   ├── /skills         → SkillsManager (lazy)
+│   ├── /training       → TrainingManager (lazy)
+│   ├── /observability  → Observability (lazy)
+│   └── /safety         → SafetyZones (lazy)
+└── Global Components
+    ├── AlertCenter     → Notification panel
+    └── Toast           → Toast notifications
+```
+
+### 3D Visualization
+
+```javascript
+import { RobotVisualizer3D } from './components/visualization/RobotVisualizer3D';
+
+// Real-time 3D robot arm with safety zones
+<RobotVisualizer3D
+  showSafetyZone={true}
+  showTrajectory={true}
+  showControls={true}
+/>
+```
+
+### WebSocket Connection
+
+```javascript
+import { useWebSocket } from './hooks/useWebSocket';
+
+// Auto-reconnecting WebSocket with heartbeat
+const { isConnected, sendMessage, connectionState } = useWebSocket();
+
+// Connection states: connecting, connected, disconnecting, disconnected
+```
+
+### Keyboard Shortcuts
+
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl+S` | Toggle sidebar |
+| `Ctrl+R` | Start/stop recording |
+| `Ctrl+T` | Toggle teleop mode |
+| `Ctrl+E` | Emergency stop |
+| `Ctrl+D` | Toggle theme |
+| `Ctrl+?` | Show help |
+
+### Running Frontend Tests
+
+```bash
+cd src/platform/ui
+
+# Run all tests
+npm test
+
+# Run with UI
+npm run test:ui
+
+# Run with coverage
+npm run test:coverage
 ```
 
 ---
@@ -517,68 +520,40 @@ curl -X POST http://localhost:8000/api/v1/robot/invoke_skill \
 
 ---
 
-## Role Coordination
+## Compute Budget (2070 FP4 TFLOPS)
 
-Dynamical supports role-based skill execution for SwarmBridge integration:
+### Fixed Allocations (750 TFLOPS)
 
-| Role | Description |
-|------|-------------|
-| `independent` | Default - acts autonomously |
-| `leader` | Primary actor, initiates coordination |
-| `follower` | Follows leader commands/trajectory |
-| `observer` | Monitors but doesn't act |
-| `assistant` | Supports leader with secondary tasks |
+| Component | TFLOPS | Purpose |
+|-----------|--------|---------|
+| **Safety V-JEPA 2 Giant** | 150 | Collision prediction @ 1kHz |
+| **Safety Ensemble** | 100 | Multi-model safety |
+| **Safety Backup** | 100 | Redundant safety model |
+| **Force/Torque Prediction** | 50 | Predictive force limiting |
+| **Core VLA + ACT** | 80 | Base action models |
+| **Learning Pipeline** | 170 | IL, MOAI, distillation |
+| **Background** | 100 | Anomaly, spatial, FHE |
 
-The role is passed via the unified skill invocation API and affects skill execution behavior.
+### Per-Peripheral Scaling (1320 TFLOPS Available)
 
----
+| Peripheral | TFLOPS Each | Components |
+|------------|-------------|------------|
+| **ONVIF Camera** | 60.0 | DINOv3 (15) + SAM3 (25) + Depth (10) + Pose (7.5) + Fusion (2.5) |
+| **Glove (DYGlove/MANUS)** | 30.0 | Retargeting (15) + Haptics (5) + Grasp Planning (10) |
 
-## Shared Crypto Library
+### Maximum Peripherals
 
-The shared crypto library (`src/shared/crypto/`) provides a unified FHE interface:
-
-```python
-from src.shared.crypto import create_fhe_backend, FHEConfig, get_available_backends
-
-# Check available backends
-print(get_available_backends())  # ['tenseal', 'n2he', 'mock']
-
-# Create with custom config
-config = FHEConfig(
-    backend='auto',
-    poly_modulus_degree=8192,
-    security_bits=128
-)
-backend = create_fhe_backend(config=config)
-
-# Encrypt/decrypt
-encrypted = backend.encrypt(gradients)
-decrypted = backend.decrypt(encrypted)
-
-# Homomorphic operations
-summed = backend.homomorphic_sum([enc1, enc2, enc3])
-```
-
----
-
-## UI Dashboard
-
-The React dashboard manages edge-specific functionality:
-
-| Component | Description |
-|-----------|-------------|
-| **Dashboard** | System status, TFLOPS usage, component health |
-| **Device Manager** | ONVIF cameras, DYGlove calibration, robot control |
-| **Skills Manager** | MoE routing, skill upload/download |
-| **Training Manager** | Datasets, training jobs, FL status |
-| **Observability** | Flight recorder, VLA status, FHE audit |
-| **Safety** | Interactive zone drawing, hazard configuration |
-
-> **Note**: Cross-site orchestration and multi-robot coordination UI are handled by SwarmBridge/SwarmBrain, not Dynamical.
+| Configuration | Cameras | Gloves | Compute Used | Headroom |
+|---------------|---------|--------|--------------|----------|
+| **Minimal** | 4 | 2 | 990 TFLOPS | 1080 |
+| **Recommended** | 12 | 2 | 1470 TFLOPS | 600 |
+| **Maximum** | 22 | 4 | 1870 TFLOPS | 200 |
 
 ---
 
 ## Testing
+
+### Backend Tests
 
 ```bash
 # Run all tests
@@ -592,17 +567,37 @@ python -m pytest tests/test_whole_body_gmr.py
 python -m pytest --cov=src
 ```
 
+### Frontend Tests
+
+```bash
+cd src/platform/ui
+
+# Run all tests
+npm test
+
+# Watch mode
+npm test -- --watch
+
+# With coverage
+npm run test:coverage
+
+# Visual UI
+npm run test:ui
+```
+
 ---
 
-## What Dynamical Does NOT Include
+## Role Coordination
 
-The following are handled by external services (SwarmBridge/SwarmBrain):
+Dynamical supports role-based skill execution for SwarmBridge integration:
 
-- Multi-robot coordination logic
-- Cross-site orchestration
-- OpenFL integration (uses Flower instead)
-- CSA registry (uses encrypted storage directly)
-- Central FL service (exposes API for external FL service)
+| Role | Description |
+|------|-------------|
+| `independent` | Default - acts autonomously |
+| `leader` | Primary actor, initiates coordination |
+| `follower` | Follows leader commands/trajectory |
+| `observer` | Monitors but doesn't act |
+| `assistant` | Supports leader with secondary tasks |
 
 ---
 
@@ -610,7 +605,8 @@ The following are handled by external services (SwarmBridge/SwarmBrain):
 
 | Version | Date | Highlights |
 |---------|------|------------|
-| **0.5.0** | Dec 2024 | **Jetson Thor upgrade** - 7.5x compute (2070 TFLOPS), 128GB memory, 10Hz control, giant model variants |
+| **0.6.0** | Dec 2024 | **Frontend Modernization** - React 18.3, Zustand stores, React Router v7, 3D visualization, unified observability, consolidated Python codebase |
+| 0.5.0 | Dec 2024 | Jetson Thor upgrade - 7.5x compute (2070 TFLOPS), 128GB memory, 200Hz control, giant model variants |
 | 0.4.0 | Dec 2024 | Meta AI Foundation Models (DINOv3, SAM3, V-JEPA 2), Isaac Lab simulation |
 | 0.3.0 | Dec 2024 | MoE skill architecture, N2HE encryption |
 | 0.2.0 | Nov 2024 | Safety zones, federated learning |
@@ -618,9 +614,31 @@ The following are handled by external services (SwarmBridge/SwarmBrain):
 
 ---
 
+## Dependencies
+
+### Backend
+- Python 3.8+
+- FastAPI 0.100+
+- SQLAlchemy 2.0+
+- TenSEAL (FHE)
+- Flower (FL)
+- PyTorch 2.0+
+
+### Frontend
+- React 18.3
+- Vite 7.2
+- Zustand 5.0
+- React Router 7.1
+- React Three Fiber 8.17
+- TanStack React Query 5.62
+- Radix UI Components
+- Vitest 2.1
+
+---
+
 ## License
 
-Proprietary - Dynamical.ai © 2024
+Proprietary - Dynamical.ai 2024
 
 ---
 
