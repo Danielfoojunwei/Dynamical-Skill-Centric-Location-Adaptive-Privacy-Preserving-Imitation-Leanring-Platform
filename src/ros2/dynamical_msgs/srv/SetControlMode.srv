@@ -1,0 +1,14 @@
+# Set actuator control mode
+
+uint8 MODE_OFF = 0
+uint8 MODE_POSITION = 1
+uint8 MODE_VELOCITY = 2
+uint8 MODE_TORQUE = 3
+
+uint8 mode
+
+---
+
+bool success
+string message
+uint8 previous_mode

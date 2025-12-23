@@ -1,0 +1,6 @@
+# Get current robot state
+
+---
+
+bool success
+dynamical_msgs/RobotState state

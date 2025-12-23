@@ -1,0 +1,9 @@
+# Stop skill execution
+
+string execution_id           # Empty = stop current skill
+bool graceful                 # True = complete current motion, False = immediate stop
+
+---
+
+bool success
+string message

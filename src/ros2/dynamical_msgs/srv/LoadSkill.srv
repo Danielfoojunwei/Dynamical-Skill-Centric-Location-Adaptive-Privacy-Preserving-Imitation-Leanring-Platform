@@ -1,0 +1,11 @@
+# Load skill into local cache
+
+string skill_id
+bool force_reload             # Reload even if cached
+
+---
+
+bool success
+string message
+bool was_cached               # True if skill was already in cache
+float64 load_time_sec

@@ -1,0 +1,15 @@
+# Request skill execution
+# Returns immediately, use SkillStatus topic to monitor progress
+
+string skill_id
+string parameters_json        # JSON-encoded parameters
+
+# Execution options
+bool wait_for_completion      # Block until skill completes
+float64 timeout_sec           # Timeout (0 = no timeout)
+
+---
+
+bool success
+string message
+string execution_id           # Unique ID for this execution

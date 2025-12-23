@@ -1,0 +1,110 @@
+# Dynamical Robot Runtime Configuration
+# This file is loaded by all ROS 2 nodes
+
+/**:
+  ros__parameters:
+    # Robot identification
+    robot_id: "dynamical_001"
+    robot_type: "generic_arm"
+
+    # Joint configuration (7-DOF arm)
+    num_joints: 7
+    joint_names:
+      - "joint1"
+      - "joint2"
+      - "joint3"
+      - "joint4"
+      - "joint5"
+      - "joint6"
+      - "joint7"
+
+    # Joint limits (radians)
+    joint_limits_lower: [-3.14, -2.09, -3.14, -2.09, -3.14, -2.09, -3.14]
+    joint_limits_upper: [3.14, 2.09, 3.14, 2.09, 3.14, 2.09, 3.14]
+
+    # Velocity limits (rad/s)
+    velocity_limits: [3.14, 3.14, 3.14, 3.14, 3.14, 3.14, 3.14]
+
+    # Torque limits (Nm)
+    torque_limits: [100.0, 100.0, 50.0, 50.0, 25.0, 25.0, 10.0]
+
+# Safety Node
+safety_node:
+  ros__parameters:
+    rate_hz: 1000
+    use_realtime_scheduling: true
+
+    # Safety margins
+    joint_limit_margin_deg: 5.0
+    velocity_limit_margin_percent: 10.0
+    torque_limit_margin_percent: 20.0
+
+    # Proximity thresholds
+    min_obstacle_distance_m: 0.10
+    human_safety_distance_m: 0.50
+
+    # Watchdog
+    watchdog_timeout_ms: 10
+
+# State Estimator Node
+state_estimator_node:
+  ros__parameters:
+    rate_hz: 1000
+    use_imu: true
+    use_force_torque: true
+
+# Actuator Node
+actuator_node:
+  ros__parameters:
+    rate_hz: 1000
+    control_mode: "velocity"  # position, velocity, torque
+    use_sim: false
+
+    # Hardware interface
+    hardware_interface: "mock"  # mock, can, ethernet
+    hardware_address: "/dev/can0"
+
+# Perception Pipeline
+perception_pipeline:
+  ros__parameters:
+    rate_hz: 30
+    use_isaac_ros: true
+
+    # Cascade thresholds
+    level2_confidence_threshold: 0.7
+    level3_confidence_threshold: 0.9
+    level3_cooldown_sec: 5.0
+
+    # Camera topics
+    camera_topics:
+      - "/camera/color/image_raw"
+
+    # Model paths (TensorRT engines)
+    level1_detector: "yolo_nano.engine"
+    level1_depth: "depth_anything_s.engine"
+    level2_features: "dinov3_small.engine"
+    level2_segmentation: "sam3_base.engine"
+
+# Skill Executor
+skill_executor:
+  ros__parameters:
+    policy_rate_hz: 100
+    max_cached_skills: 100
+    cache_dir: "/var/cache/dynamical/skills"
+
+    # Policy model
+    default_policy: "pi0_small.engine"
+
+# API Bridge
+api_bridge:
+  ros__parameters:
+    api_url: "http://localhost:8000"
+    api_key: ""
+    sync_interval_sec: 1.0
+
+# Telemetry
+telemetry:
+  ros__parameters:
+    publish_rate_hz: 10
+    buffer_size: 1000
+    enable_cloud_upload: true
