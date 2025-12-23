@@ -20,7 +20,7 @@ from .perception_pipeline import PerceptionPipeline, CascadeLevel
 from .policy_executor import PolicyExecutor
 from .skill_cache import SkillCache
 from .watchdog import Watchdog
-from .config import RobotRuntimeConfig, TierConfig
+from .config import RobotRuntimeConfig, Tier1Config, Tier2Config, SafetyConfig, PerceptionConfig
 
 __all__ = [
     # Main agent
@@ -42,5 +42,8 @@ __all__ = [
 
     # Configuration
     'RobotRuntimeConfig',
-    'TierConfig',
+    'Tier1Config',
+    'Tier2Config',
+    'SafetyConfig',
+    'PerceptionConfig',
 ]
