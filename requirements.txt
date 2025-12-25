@@ -1,18 +1,73 @@
 # =============================================================================
-# Dynamical Edge Platform v0.7.1 Dependencies
+# Dynamical Edge Platform v0.8.0 Dependencies
+# Optimized for NVIDIA Jetson Thor (128GB, 2070 TFLOPS)
 # =============================================================================
 
 # Core ML
-torch>=2.7.0                # Required for SAM3 and V-JEPA 2
+torch>=2.7.0                # Required for SAM3, V-JEPA 2, Pi0.5
 torchvision>=0.18.0
 numpy>=1.24.0
 
-# Hugging Face / Pi0 / VLA Models
-transformers>=4.56.0        # Required for DINOv3 HuggingFace integration
+# Hugging Face / VLA Models
+transformers>=4.56.0        # Required for Gemma 3, DINOv3
 accelerate>=0.27.0
 protobuf
 safetensors
 sentencepiece
+
+# =============================================================================
+# VLA Models (Pi0.5 + Gemma 3)
+# =============================================================================
+# Pi0.5 - Vision-Language-Action Model from Physical Intelligence
+# Repository: https://github.com/Physical-Intelligence/openpi
+# Paper: https://arxiv.org/abs/2504.16054
+# -----------------------------------------------------------------------------
+# Installation (requires uv package manager):
+#   git clone --recurse-submodules https://github.com/Physical-Intelligence/openpi.git
+#   cd openpi && pip install -e .
+#
+# Available checkpoints:
+#   - pi0_base: Original Pi0 base model
+#   - pi0_fast_base: Fast inference variant
+#   - pi05_base: Pi0.5 with open-world generalization
+#   - pi05_libero: Fine-tuned for LIBERO benchmark (SOTA)
+#   - pi05_droid: Fine-tuned on DROID dataset
+#
+# Example usage:
+#   from openpi.training import config
+#   from openpi.policies import policy_config
+#   cfg = config.get_config("pi05_base")
+#   policy = policy_config.create_trained_policy(cfg, checkpoint_dir)
+#   actions = policy.infer(observation)["actions"]
+
+# -----------------------------------------------------------------------------
+# Gemma 3 - Google's Multimodal Language Model
+# Repository: https://huggingface.co/collections/google/gemma-3-release
+# Blog: https://huggingface.co/blog/gemma3
+# -----------------------------------------------------------------------------
+# Gemma 3 model sizes:
+#   - google/gemma-3-270m-it: 270M params (text-only, ~1GB)
+#   - google/gemma-3-1b-it: 1B params (text-only, ~2GB)
+#   - google/gemma-3-4b-it: 4B params (multimodal, ~8GB) - Recommended for Orin
+#   - google/gemma-3-12b-it: 12B params (multimodal, ~24GB)
+#   - google/gemma-3-27b-it: 27B params (multimodal, ~54GB) - Recommended for Thor
+#
+# Features:
+#   - 128k context window
+#   - Native image+text multimodal
+#   - 140+ language support
+#
+# Example usage:
+#   from transformers import AutoProcessor, Gemma3ForConditionalGeneration
+#   model = Gemma3ForConditionalGeneration.from_pretrained(
+#       "google/gemma-3-27b-it",
+#       torch_dtype=torch.float16,
+#       attn_implementation="flash_attention_2"
+#   )
+
+# Jetson Thor optimizations
+# flash-attn>=2.5.0         # Flash Attention 2 for faster inference
+# transformer-engine>=1.0   # FP8 support for Blackwell GPUs
 
 # =============================================================================
 # Pose Estimation (RTMPose)

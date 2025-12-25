@@ -1,20 +1,38 @@
 """
-Pi0: A Vision-Language-Action Flow Model for General Robot Control (AGX Orin Port).
+Pi0: A Vision-Language-Action Flow Model for General Robot Control.
 
-This module implements the Pi0 model from Physical Intelligence for embodied AI.
+This module implements the Pi0 model from Physical Intelligence for embodied AI,
+with support for multiple VLM backbones including Gemma 3.
+
+Supported Backbones:
+===================
+- PaliGemma 3B (legacy): google/paligemma-3b-pt-224
+- Gemma 3 4B (multimodal): google/gemma-3-4b-it
+- Gemma 3 12B (multimodal): google/gemma-3-12b-it
+- Gemma 3 27B (multimodal): google/gemma-3-27b-it
+
+Jetson Thor Optimizations:
+=========================
+With 128GB memory and 2070 TFLOPS, Jetson Thor can run:
+- Gemma 3-27B: Full precision, ~50GB memory
+- Gemma 3-12B: Full precision, ~24GB memory
+- Gemma 3-4B: Full precision, ~8GB memory
 
 IMPORTANT: This module requires PyTorch and Transformers to be installed.
-Install with: pip install torch torchvision transformers
+Install with: pip install torch torchvision transformers>=4.56.0
 
 References:
 - Physical Intelligence: https://www.physicalintelligence.company/
+- Gemma 3: https://huggingface.co/blog/gemma3
 - PaliGemma: https://huggingface.co/google/paligemma-3b-pt-224
 """
 
 import logging
 import os
 import time
-from typing import Optional, List, Dict, Any
+from dataclasses import dataclass
+from enum import Enum
+from typing import Optional, List, Dict, Any, Union
 
 # Require PyTorch - no mock fallback for production
 try:
@@ -32,36 +50,208 @@ except ImportError:
 
 # Require Transformers for VLM backbone
 try:
-    from transformers import AutoProcessor, AutoTokenizer, PaliGemmaForConditionalGeneration
+    from transformers import (
+        AutoProcessor,
+        AutoTokenizer,
+        AutoModel,
+        AutoModelForCausalLM,
+        PaliGemmaForConditionalGeneration,
+    )
+    # Try to import Gemma 3 specific classes
+    try:
+        from transformers import Gemma3ForConditionalGeneration
+        HAS_GEMMA3 = True
+    except ImportError:
+        HAS_GEMMA3 = False
+
     HAS_TRANSFORMERS = True
 except ImportError:
     HAS_TRANSFORMERS = False
+    HAS_GEMMA3 = False
     raise ImportError(
         "Transformers is required for Pi0 model. "
-        "Install with: pip install transformers"
+        "Install with: pip install transformers>=4.56.0"
     )
 
 from .modules import ActionEncoder, GemmaMoE, MoeExpertConfig, SinusoidalPosEmb
 
 logger = logging.getLogger(__name__)
 
+
+class VLMBackbone(Enum):
+    """Supported VLM backbone models."""
+    # Legacy PaliGemma
+    PALIGEMMA_3B = "google/paligemma-3b-pt-224"
+
+    # Gemma 3 multimodal variants (March 2025)
+    GEMMA3_4B = "google/gemma-3-4b-it"
+    GEMMA3_12B = "google/gemma-3-12b-it"
+    GEMMA3_27B = "google/gemma-3-27b-it"
+
+    # Gemma 3 text-only variants
+    GEMMA3_1B = "google/gemma-3-1b-it"
+    GEMMA3_270M = "google/gemma-3-270m-it"
+
+
+# VLM hidden sizes for each backbone
+VLM_HIDDEN_SIZES = {
+    VLMBackbone.PALIGEMMA_3B: 2048,
+    VLMBackbone.GEMMA3_270M: 1536,
+    VLMBackbone.GEMMA3_1B: 2048,
+    VLMBackbone.GEMMA3_4B: 3072,
+    VLMBackbone.GEMMA3_12B: 4608,
+    VLMBackbone.GEMMA3_27B: 5120,
+}
+
+# Image resolutions for each backbone
+VLM_IMAGE_SIZES = {
+    VLMBackbone.PALIGEMMA_3B: 224,
+    VLMBackbone.GEMMA3_4B: 448,
+    VLMBackbone.GEMMA3_12B: 448,
+    VLMBackbone.GEMMA3_27B: 448,
+}
+
+# Memory requirements (GB) for each backbone
+VLM_MEMORY_GB = {
+    VLMBackbone.PALIGEMMA_3B: 6,
+    VLMBackbone.GEMMA3_270M: 1,
+    VLMBackbone.GEMMA3_1B: 2,
+    VLMBackbone.GEMMA3_4B: 8,
+    VLMBackbone.GEMMA3_12B: 24,
+    VLMBackbone.GEMMA3_27B: 54,
+}
+
+
+@dataclass
+class Pi0Config:
+    """Configuration for Pi0 model."""
+    # VLM backbone selection
+    vlm_backbone: VLMBackbone = VLMBackbone.GEMMA3_12B  # Default for Thor
+
+    # Action configuration
+    action_dim: int = 7
+    action_horizon: int = 16
+
+    # VLM expert configuration
+    vlm_expert_intermediate_size: int = 16384
+    vlm_expert_num_heads: int = 8
+    vlm_expert_num_kv_heads: int = 1
+    vlm_expert_head_dim: int = 256
+    vlm_max_text_tokens: int = 128
+
+    # Action expert configuration
+    action_expert_width: int = 1024
+    action_expert_intermediate_size: int = 4096
+    action_expert_num_heads: int = 8
+    action_expert_num_kv_heads: int = 1
+    action_expert_head_dim: int = 256
+
+    # MoE configuration
+    moe_depth: int = 18
+
+    # Flow matching configuration
+    num_inference_steps: int = 10
+    flow_sig_min: float = 0.001
+    flow_alpha: float = 1.5
+    flow_beta: float = 1.0
+
+    # Hardware configuration
+    dtype: str = "float16"  # float16, bfloat16, float32
+    device: str = "cuda"
+
+    # Jetson Thor optimizations
+    use_tensorrt: bool = False
+    use_fp8: bool = False  # Thor has native FP8 support
+    use_flash_attention: bool = True
+
+    @property
+    def vlm_expert_width(self) -> int:
+        """Get VLM expert width based on backbone."""
+        return VLM_HIDDEN_SIZES.get(self.vlm_backbone, 2048)
+
+    @property
+    def image_size(self) -> int:
+        """Get image size for backbone."""
+        return VLM_IMAGE_SIZES.get(self.vlm_backbone, 224)
+
+    @property
+    def memory_required_gb(self) -> float:
+        """Estimate memory required for this configuration."""
+        vlm_mem = VLM_MEMORY_GB.get(self.vlm_backbone, 8)
+        # Add ~2GB for MoE and action components
+        return vlm_mem + 2.0
+
+    @classmethod
+    def for_jetson_thor(cls) -> "Pi0Config":
+        """Optimal configuration for Jetson Thor (128GB, 2070 TFLOPS)."""
+        return cls(
+            vlm_backbone=VLMBackbone.GEMMA3_27B,  # Can run largest model
+            action_dim=7,
+            action_horizon=16,
+            moe_depth=24,  # Deeper MoE with Thor's compute
+            num_inference_steps=10,
+            dtype="float16",
+            use_tensorrt=True,
+            use_fp8=True,
+            use_flash_attention=True,
+        )
+
+    @classmethod
+    def for_jetson_orin(cls) -> "Pi0Config":
+        """Configuration for Jetson AGX Orin (64GB, 275 TFLOPS)."""
+        return cls(
+            vlm_backbone=VLMBackbone.GEMMA3_4B,  # Fits in memory
+            action_dim=7,
+            action_horizon=16,
+            moe_depth=18,
+            num_inference_steps=10,
+            dtype="float16",
+            use_tensorrt=True,
+            use_fp8=False,
+            use_flash_attention=True,
+        )
+
+    @classmethod
+    def for_development(cls) -> "Pi0Config":
+        """Lightweight configuration for development/testing."""
+        return cls(
+            vlm_backbone=VLMBackbone.PALIGEMMA_3B,
+            action_dim=7,
+            action_horizon=16,
+            moe_depth=12,
+            num_inference_steps=5,
+            dtype="float32",
+            use_tensorrt=False,
+            use_fp8=False,
+            use_flash_attention=False,
+        )
+
+
 # Global tokenizer for static method
 _tokenizer = None
-LANGUAGE_MODEL_NAME = "google/paligemma-3b-pt-224"
-VLM_BACKBONE = "google/paligemma-3b-pt-224"
-VLM_EXPERT_WIDTH = 2048  # Width of the VLM expert, matches PaliGemma's hidden size
+
+# Default backbone (updated to Gemma 3-12B for Thor)
+LANGUAGE_MODEL_NAME = VLMBackbone.GEMMA3_12B.value
+VLM_BACKBONE = VLMBackbone.GEMMA3_12B.value
+VLM_EXPERT_WIDTH = VLM_HIDDEN_SIZES[VLMBackbone.GEMMA3_12B]
 
 
 class Pi0(nn.Module):
-    """Implementation of Pi0 model from the Physical Intelligence paper.
-    
-    Ported for AGX Orin 32GB.
+    """
+    Implementation of Pi0 model from the Physical Intelligence paper.
+
+    Supports multiple VLM backbones:
+    - PaliGemma 3B (legacy)
+    - Gemma 3 4B/12B/27B (multimodal, recommended for Thor)
+
+    Optimized for NVIDIA Jetson Thor with 128GB memory and 2070 TFLOPS.
     """
 
     def __init__(
         self,
-        action_dim: int,
-        action_horizon: int,
+        action_dim: int = 7,
+        action_horizon: int = 16,
+        vlm_backbone: Union[VLMBackbone, str] = VLMBackbone.GEMMA3_12B,
         vlm_expert_intermediate_size: int = 16384,
         vlm_expert_num_heads: int = 8,
         vlm_expert_num_kv_heads: int = 1,
@@ -77,47 +267,134 @@ class Pi0(nn.Module):
         flow_sig_min: float = 0.001,
         flow_alpha: float = 1.5,
         flow_beta: float = 1.0,
-        dtype: torch.dtype = torch.float32,
-        device: str = "cuda"
+        dtype: torch.dtype = torch.float16,
+        device: str = "cuda",
+        use_flash_attention: bool = True,
+        config: Optional[Pi0Config] = None,
     ):
         super().__init__()
-        
-        # if not HAS_TRANSFORMERS:
-        #     raise ImportError("Transformers library is required for Pi0")
 
+        # Use config if provided
+        if config is not None:
+            vlm_backbone = config.vlm_backbone
+            action_dim = config.action_dim
+            action_horizon = config.action_horizon
+            vlm_expert_intermediate_size = config.vlm_expert_intermediate_size
+            vlm_expert_num_heads = config.vlm_expert_num_heads
+            vlm_expert_num_kv_heads = config.vlm_expert_num_kv_heads
+            vlm_expert_head_dim = config.vlm_expert_head_dim
+            vlm_max_text_tokens = config.vlm_max_text_tokens
+            action_expert_width = config.action_expert_width
+            action_expert_intermediate_size = config.action_expert_intermediate_size
+            action_expert_num_heads = config.action_expert_num_heads
+            action_expert_num_kv_heads = config.action_expert_num_kv_heads
+            action_expert_head_dim = config.action_expert_head_dim
+            moe_depth = config.moe_depth
+            num_inference_steps = config.num_inference_steps
+            flow_sig_min = config.flow_sig_min
+            flow_alpha = config.flow_alpha
+            flow_beta = config.flow_beta
+            device = config.device
+            use_flash_attention = config.use_flash_attention
+
+            # Convert dtype string to torch dtype
+            dtype_map = {
+                "float16": torch.float16,
+                "bfloat16": torch.bfloat16,
+                "float32": torch.float32,
+            }
+            dtype = dtype_map.get(config.dtype, torch.float16)
+
+        # Handle string backbone specification
+        if isinstance(vlm_backbone, str):
+            vlm_backbone = VLMBackbone(vlm_backbone)
+
+        self.vlm_backbone_type = vlm_backbone
+        self.vlm_backbone_name = vlm_backbone.value
         self.action_dim = action_dim
         self.action_horizon = action_horizon
         self.vlm_max_text_tokens = vlm_max_text_tokens
+
+        # Get VLM-specific dimensions
+        self.vlm_hidden_size = VLM_HIDDEN_SIZES.get(vlm_backbone, 2048)
+        self.image_size = VLM_IMAGE_SIZES.get(vlm_backbone, 224)
+
         # Assuming 3 cameras for now as per AGX config
-        num_rgbs = 3 
-        self.vlm_max_tokens = num_rgbs * 256 + self.vlm_max_text_tokens
+        num_rgbs = 3
+        # Image tokens depend on backbone
+        if vlm_backbone in [VLMBackbone.GEMMA3_4B, VLMBackbone.GEMMA3_12B, VLMBackbone.GEMMA3_27B]:
+            # Gemma 3 uses different image tokenization
+            self.tokens_per_image = 576  # 24x24 patches
+        else:
+            self.tokens_per_image = 256  # PaliGemma default
+
+        self.vlm_max_tokens = num_rgbs * self.tokens_per_image + self.vlm_max_text_tokens
         self.num_inference_steps = num_inference_steps
         self.flow_sig_min = flow_sig_min
         self.flow_beta_dist = torch.distributions.Beta(flow_alpha, flow_beta)
         self.dtype = dtype
         self.device = device
-        
+
         # Proprioception dimension (joints + vel + torque)
         # Assuming 7 joints -> 7 + 7 + 7 = 21
-        proprio_dim = 21 
+        proprio_dim = 21
 
-        logger.info(f"Loading VLM Backbone: {VLM_BACKBONE}")
-        self.vlm = PaliGemmaForConditionalGeneration.from_pretrained(
-            VLM_BACKBONE, dtype=self.dtype, attn_implementation="eager"
-        )
+        # Determine attention implementation
+        attn_impl = "flash_attention_2" if use_flash_attention else "eager"
+
+        # Load VLM backbone based on type
+        logger.info(f"Loading VLM Backbone: {self.vlm_backbone_name}")
+        logger.info(f"  Hidden size: {self.vlm_hidden_size}")
+        logger.info(f"  Image size: {self.image_size}")
+        logger.info(f"  Memory required: ~{VLM_MEMORY_GB.get(vlm_backbone, 8)}GB")
+
+        if vlm_backbone == VLMBackbone.PALIGEMMA_3B:
+            # Legacy PaliGemma loading
+            self.vlm = PaliGemmaForConditionalGeneration.from_pretrained(
+                self.vlm_backbone_name,
+                torch_dtype=self.dtype,
+                attn_implementation="eager",  # PaliGemma doesn't support flash
+            )
+            self.is_gemma3 = False
+        elif vlm_backbone in [VLMBackbone.GEMMA3_4B, VLMBackbone.GEMMA3_12B, VLMBackbone.GEMMA3_27B]:
+            # Gemma 3 multimodal loading
+            if HAS_GEMMA3:
+                self.vlm = Gemma3ForConditionalGeneration.from_pretrained(
+                    self.vlm_backbone_name,
+                    torch_dtype=self.dtype,
+                    attn_implementation=attn_impl,
+                )
+            else:
+                # Fallback to AutoModel
+                self.vlm = AutoModel.from_pretrained(
+                    self.vlm_backbone_name,
+                    torch_dtype=self.dtype,
+                    attn_implementation=attn_impl,
+                    trust_remote_code=True,
+                )
+            self.is_gemma3 = True
+        else:
+            # Text-only Gemma 3 variants
+            self.vlm = AutoModelForCausalLM.from_pretrained(
+                self.vlm_backbone_name,
+                torch_dtype=self.dtype,
+                attn_implementation=attn_impl,
+            )
+            self.is_gemma3 = True
+
         self.vlm_processor = AutoProcessor.from_pretrained(
-            VLM_BACKBONE, padding_side="right"
+            self.vlm_backbone_name, padding_side="right"
         )
         self.vlm_embedding_module = self.vlm.get_input_embeddings()
-        
+
         # Disable finetuning of the VLM
         for param in self.vlm.parameters():
             param.requires_grad = False
-            
+
         # Create a mixture of experts (MoE) model
         expert_configs = {
             "vlm": MoeExpertConfig(
-                hidden_size=VLM_EXPERT_WIDTH,
+                hidden_size=self.vlm_hidden_size,  # Use backbone-specific size
                 intermediate_size=vlm_expert_intermediate_size,
                 head_dim=vlm_expert_head_dim,
                 num_attention_heads=vlm_expert_num_heads,
@@ -140,23 +417,51 @@ class Pi0(nn.Module):
             self.action_dim,
         )
 
-        gemma_config = self.vlm.config.text_config
-        self.using_pretrained_paligemma = (
-            gemma_config.intermediate_size == vlm_expert_intermediate_size
-            and gemma_config.hidden_size == VLM_EXPERT_WIDTH
-        )
-        
-        # Load PaliGemma weights into VLM expert
-        if self.using_pretrained_paligemma:
+        # Check if we can use pretrained weights
+        try:
+            gemma_config = self.vlm.config.text_config
+            self.using_pretrained_vlm = (
+                gemma_config.intermediate_size == vlm_expert_intermediate_size
+                and gemma_config.hidden_size == self.vlm_hidden_size
+            )
+        except AttributeError:
+            self.using_pretrained_vlm = False
+
+        # Load pretrained weights into VLM expert
+        if self.using_pretrained_vlm:
             self._load_pretrained_vlm_weights()
-        
+
         # Delete the language model to save memory (keep only embeddings)
-        del self.vlm.model.language_model
-        
-        # Resize the images to 224x224
+        if hasattr(self.vlm, 'model') and hasattr(self.vlm.model, 'language_model'):
+            del self.vlm.model.language_model
+        elif hasattr(self.vlm, 'language_model'):
+            del self.vlm.language_model
+
+        # Resize the images to appropriate size for backbone
         self.image_normalizer = torch.nn.Sequential(
-            T.Resize((224, 224)),
+            T.Resize((self.image_size, self.image_size)),
         )
+
+        logger.info(f"Pi0 model initialized with {vlm_backbone.value}")
+        logger.info(f"  Using pretrained VLM weights: {self.using_pretrained_vlm}")
+        logger.info(f"  Is Gemma 3: {self.is_gemma3}")
+
+    @classmethod
+    def from_config(cls, config: Pi0Config) -> "Pi0":
+        """Create Pi0 model from configuration."""
+        return cls(config=config)
+
+    @classmethod
+    def for_jetson_thor(cls) -> "Pi0":
+        """Create Pi0 model optimized for Jetson Thor."""
+        config = Pi0Config.for_jetson_thor()
+        return cls.from_config(config)
+
+    @classmethod
+    def for_jetson_orin(cls) -> "Pi0":
+        """Create Pi0 model optimized for Jetson AGX Orin."""
+        config = Pi0Config.for_jetson_orin()
+        return cls.from_config(config)
 
     def _load_pretrained_vlm_weights(self) -> None:
         """Load pretrained PaliGemma weights into the VLM expert of the MoE."""

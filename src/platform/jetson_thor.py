@@ -372,6 +372,21 @@ def get_performance_comparison() -> List[PerformanceComparison]:
 # Model Configuration for Thor
 # =============================================================================
 
+class VLABackend(Enum):
+    """VLA model backend options."""
+    PI0_CUSTOM = "pi0_custom"      # Custom Pi0 with Gemma 3
+    PI05_OPENPI = "pi05_openpi"    # Official Physical Intelligence Pi0.5
+    PI0_FAST = "pi0_fast"          # Fast inference variant
+
+
+class VLMBackendType(Enum):
+    """VLM backbone options for custom Pi0."""
+    PALIGEMMA_3B = "paligemma_3b"
+    GEMMA3_4B = "gemma3_4b"
+    GEMMA3_12B = "gemma3_12b"
+    GEMMA3_27B = "gemma3_27b"
+
+
 @dataclass
 class ThorModelConfig:
     """
@@ -379,6 +394,16 @@ class ThorModelConfig:
 
     With 7.5x more compute and 2x memory, we can run
     significantly larger and more capable models.
+
+    Jetson Thor Specifications:
+    - Memory: 128GB LPDDR5X
+    - AI Compute: 2070 FP4 TFLOPS
+    - Native FP8 support via Blackwell
+
+    This enables:
+    - Gemma 3-27B VLM backbone
+    - Pi0.5 with open-world generalization
+    - 10Hz control with full perception pipeline
     """
     # Vision backbone - use Giant instead of Base
     dinov3_variant: str = "vitg16"  # Was vitb16 on Orin
@@ -397,8 +422,30 @@ class ThorModelConfig:
     vjepa2_variant: str = "vit_giant_384"  # Was vit_large on Orin
     vjepa2_action_conditioned: bool = True
 
-    # VLA - use Large
-    vla_variant: str = "pi0_large"  # Was pi0_base on Orin
+    # ==========================================================================
+    # VLA Configuration (Updated for Pi0.5 + Gemma 3)
+    # ==========================================================================
+
+    # VLA backend selection
+    vla_backend: VLABackend = VLABackend.PI05_OPENPI  # Use official Pi0.5
+
+    # Custom Pi0 configuration (used when vla_backend == PI0_CUSTOM)
+    pi0_vlm_backbone: VLMBackendType = VLMBackendType.GEMMA3_27B  # Thor can run 27B
+    pi0_action_dim: int = 7
+    pi0_action_horizon: int = 16
+    pi0_moe_depth: int = 24  # Deeper MoE with Thor's compute
+
+    # Pi0.5 OpenPI configuration (used when vla_backend == PI05_OPENPI)
+    pi05_variant: str = "pi05_base"  # Options: pi0_base, pi05_base, pi05_libero, pi05_droid
+    pi05_use_tensorrt: bool = True
+    pi05_use_fp8: bool = True
+
+    # Legacy VLA variant (for backwards compatibility)
+    vla_variant: str = "pi05_gemma3_27b"
+
+    # ==========================================================================
+    # LLM Configuration
+    # ==========================================================================
 
     # Enable LLM reasoning (new with Thor!)
     enable_llm: bool = True
@@ -409,6 +456,53 @@ class ThorModelConfig:
     enable_world_model: bool = True
     world_model: str = "vjepa2_ac"
 
+    # ==========================================================================
+    # Memory Budget (128GB total)
+    # ==========================================================================
+
+    def get_memory_allocation(self) -> Dict[str, float]:
+        """Get recommended memory allocation for Thor's 128GB."""
+        base_allocation = {
+            # Perception models (~20GB)
+            "dinov3_vitg": 8.0,
+            "sam3_large": 6.0,
+            "depth_large": 2.0,
+            "rtmpose_x": 1.0,
+            "vjepa2_giant": 10.0,
+
+            # System overhead
+            "system": 8.0,
+            "cache": 10.0,
+        }
+
+        # Add VLA allocation based on backend
+        if self.vla_backend == VLABackend.PI0_CUSTOM:
+            vlm_memory = {
+                VLMBackendType.PALIGEMMA_3B: 6.0,
+                VLMBackendType.GEMMA3_4B: 8.0,
+                VLMBackendType.GEMMA3_12B: 24.0,
+                VLMBackendType.GEMMA3_27B: 54.0,
+            }
+            base_allocation["pi0_vlm"] = vlm_memory.get(self.pi0_vlm_backbone, 24.0)
+            base_allocation["pi0_moe"] = 4.0
+        else:
+            # Pi0.5 uses ~32GB for full model
+            base_allocation["pi05"] = 32.0
+
+        # Add LLM if enabled
+        if self.enable_llm:
+            base_allocation["llm"] = 16.0  # 8B quantized
+
+        return base_allocation
+
+    def get_total_memory_gb(self) -> float:
+        """Get total memory required."""
+        return sum(self.get_memory_allocation().values())
+
+    def validate_memory(self) -> bool:
+        """Check if configuration fits in Thor's 128GB."""
+        return self.get_total_memory_gb() <= 120.0  # Leave 8GB for system
+
     def get_model_list(self) -> List[str]:
         """Get list of all enabled models."""
         models = [
@@ -417,11 +511,38 @@ class ThorModelConfig:
             f"depth_{self.depth_variant}",
             self.pose_variant,
             f"vjepa2_{self.vjepa2_variant}",
-            f"vla_{self.vla_variant}",
         ]
+
+        # Add VLA model
+        if self.vla_backend == VLABackend.PI0_CUSTOM:
+            models.append(f"pi0_gemma3_{self.pi0_vlm_backbone.value}")
+        else:
+            models.append(f"pi05_{self.pi05_variant}")
+
         if self.enable_llm:
             models.append(self.llm_model)
+
         return models
+
+    def get_vla_config(self) -> Dict[str, Any]:
+        """Get VLA configuration for initialization."""
+        if self.vla_backend == VLABackend.PI0_CUSTOM:
+            return {
+                "backend": "pi0_custom",
+                "vlm_backbone": self.pi0_vlm_backbone.value,
+                "action_dim": self.pi0_action_dim,
+                "action_horizon": self.pi0_action_horizon,
+                "moe_depth": self.pi0_moe_depth,
+                "use_flash_attention": True,
+                "dtype": "float16",
+            }
+        else:
+            return {
+                "backend": "pi05_openpi",
+                "variant": self.pi05_variant,
+                "use_tensorrt": self.pi05_use_tensorrt,
+                "use_fp8": self.pi05_use_fp8,
+            }
 
 
 # Global model config for Thor
