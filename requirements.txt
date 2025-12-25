@@ -1,14 +1,14 @@
 # =============================================================================
-# Dynamical Edge Platform v0.3.2 Dependencies
+# Dynamical Edge Platform v0.7.1 Dependencies
 # =============================================================================
 
 # Core ML
-torch>=2.0.0
-torchvision>=0.15.0
+torch>=2.7.0                # Required for SAM3 and V-JEPA 2
+torchvision>=0.18.0
 numpy>=1.24.0
 
 # Hugging Face / Pi0 / VLA Models
-transformers>=4.38.0
+transformers>=4.56.0        # Required for DINOv3 HuggingFace integration
 accelerate>=0.27.0
 protobuf
 safetensors
@@ -101,23 +101,74 @@ pytest-asyncio>=0.21.0
 # =============================================================================
 # Meta AI Models (DINOv3, SAM3, V-JEPA 2)
 # =============================================================================
-# These models require torch hub or manual download from Meta's repos
+# These models can be loaded via:
+# 1. HuggingFace Transformers (recommended for DINOv3)
+# 2. PyTorch Hub (recommended for V-JEPA 2)
+# 3. Direct package installation (required for SAM3)
 
-# DINOv3 dependencies
+# -----------------------------------------------------------------------------
+# DINOv3 - Self-Supervised Vision Foundation Model
+# Repository: https://github.com/facebookresearch/dinov3
+# -----------------------------------------------------------------------------
+# Option A: HuggingFace (easiest - no extra install needed)
+#   from transformers import AutoImageProcessor, AutoModel
+#   model = AutoModel.from_pretrained("facebook/dinov3-vitl16-pretrain-lvd1689m")
+#
+# Option B: PyTorch Hub
+#   model = torch.hub.load('facebookresearch/dinov3', 'dinov3_vitl16')
+#
+# Option C: Clone repository for full API
+#   git clone https://github.com/facebookresearch/dinov3
+#   pip install -e dinov3/
+
 timm>=0.9.0                 # Vision transformer implementations
 
-# SAM3 dependencies
-# Install from: github.com/facebookresearch/sam3
-# pip install git+https://github.com/facebookresearch/sam3.git
+# -----------------------------------------------------------------------------
+# SAM3 - Segment Anything Model 3 (Text-Driven Segmentation)
+# Repository: https://github.com/facebookresearch/sam3
+# Requires: Python 3.12+, PyTorch 2.7+, CUDA 12.6+
+# -----------------------------------------------------------------------------
+# Installation:
+#   pip install git+https://github.com/facebookresearch/sam3.git
+#
+# Or clone for development:
+#   git clone https://github.com/facebookresearch/sam3
+#   cd sam3 && pip install -e .
+#
+# NOTE: SAM3 checkpoints require HuggingFace authentication:
+#   huggingface-cli login
+#   # Request access at: https://huggingface.co/facebook/sam3
 
-# V-JEPA 2 dependencies
-# Install from: github.com/facebookresearch/vjepa2
-# pip install git+https://github.com/facebookresearch/vjepa2.git
+# -----------------------------------------------------------------------------
+# V-JEPA 2 - Video World Model for Robotics
+# Repository: https://github.com/facebookresearch/vjepa2
+# -----------------------------------------------------------------------------
+# Option A: PyTorch Hub (easiest)
+#   processor = torch.hub.load('facebookresearch/vjepa2', 'vjepa2_preprocessor')
+#   model = torch.hub.load('facebookresearch/vjepa2', 'vjepa2_vit_giant')
+#
+# Option B: HuggingFace
+#   from transformers import AutoVideoProcessor, AutoModel
+#   model = AutoModel.from_pretrained("facebook/vjepa2-vitg-fpc64-256")
+#
+# Option C: Clone for action-conditioned model (robotics)
+#   git clone https://github.com/facebookresearch/vjepa2
+#   pip install -e vjepa2/
+#
+# Action-conditioned model for robot planning:
+#   encoder, ac_predictor = torch.hub.load('facebookresearch/vjepa2', 'vjepa2_ac_vit_giant')
+
+# NOTE for macOS: V-JEPA 2 requires decord for video. Use eva-decord or decord2:
+#   pip install eva-decord
 
 # Shared dependencies for Meta AI models
 einops>=0.6.0               # Tensor operations
 ftfy>=6.1.0                 # Text processing for CLIP-style models
 regex>=2023.0               # Text tokenization
 
-# Optional: Flash Attention for faster inference
+# Optional: Flash Attention for faster inference (Linux only)
 # pip install flash-attn --no-build-isolation
+
+# Optional: Decord for video loading (V-JEPA 2)
+# pip install decord  # Linux/Windows
+# pip install eva-decord  # macOS

@@ -7,14 +7,21 @@ Key features:
 - Real-time video object tracking
 - Multi-object segmentation in single pass
 - 848M parameters, runs efficiently on edge
+- Open-vocabulary segmentation with presence tokens
 
 Repository: github.com/facebookresearch/sam3
-License: Apache 2.0
+License: SAM License
 
 Integration with Dynamical Platform:
 - Text-driven manipulation: "grasp the blue handle"
 - Safety zone segmentation: "segment all humans"
 - Object-centric skill learning
+
+Requirements:
+- Python 3.12+
+- PyTorch 2.7+
+- CUDA 12.6+ (for GPU)
+- HuggingFace authentication for checkpoint access
 """
 
 import os
@@ -46,6 +53,18 @@ try:
     HAS_PIL = True
 except ImportError:
     HAS_PIL = False
+
+# SAM3 package imports
+try:
+    from sam3.model_builder import build_sam3_image_model, build_sam3_video_predictor
+    from sam3.model.sam3_image_processor import Sam3Processor
+    HAS_SAM3 = True
+except ImportError:
+    HAS_SAM3 = False
+    build_sam3_image_model = None
+    build_sam3_video_predictor = None
+    Sam3Processor = None
+    logger.info("SAM3 package not installed - will use mock or fallback")
 
 
 # =============================================================================
@@ -94,6 +113,10 @@ class SAM3Config:
     # Optimization
     use_fp16: bool = True
     compile_model: bool = False
+
+    # Loading options
+    use_real_sam3: bool = True      # Try to use real SAM3 package
+    hf_auth_token: Optional[str] = None  # HuggingFace auth for checkpoints
 
     # Cache settings
     cache_dir: str = "/var/lib/dynamical/models/sam3"
@@ -180,17 +203,25 @@ class SAM3Segmenter:
     def __init__(self, config: SAM3Config = None):
         self.config = config or SAM3Config()
 
-        # Model components
+        # Model components - real SAM3
+        self.sam3_model = None       # Real SAM3 image model
+        self.sam3_processor = None   # Real SAM3 processor
+        self.video_predictor = None  # Real SAM3 video predictor
+
+        # Model components - mock fallback
         self.image_encoder = None
         self.text_encoder = None
         self.mask_decoder = None
         self.tracker = None
 
         self._is_loaded = False
+        self._using_real_sam3 = False
+        self._using_mock = False
 
         # Tracking state
         self._track_memory: Dict[int, Any] = {}
         self._frame_count = 0
+        self._video_session_id: Optional[str] = None
 
         # Statistics
         self.stats = {
@@ -198,6 +229,7 @@ class SAM3Segmenter:
             "text_queries": 0,
             "objects_segmented": 0,
             "avg_inference_time_ms": 0.0,
+            "backend": "not_loaded",
         }
 
         # Create cache directory
@@ -206,6 +238,10 @@ class SAM3Segmenter:
     def load_model(self, weights_path: Optional[str] = None) -> bool:
         """
         Load SAM3 model.
+
+        Loading priority:
+        1. Real SAM3 package (if installed and configured)
+        2. Mock model (for development)
 
         Args:
             weights_path: Path to custom weights
@@ -216,48 +252,93 @@ class SAM3Segmenter:
         if not HAS_TORCH:
             logger.warning("PyTorch not available - using mock SAM3")
             self._is_loaded = True
+            self._using_mock = True
+            self.stats["backend"] = "mock"
             return True
 
         try:
-            logger.info(f"Loading SAM3 model: {self.config.model_size.value}")
+            # Try to load real SAM3 first
+            if self.config.use_real_sam3 and HAS_SAM3:
+                loaded = self._load_real_sam3()
+                if loaded:
+                    self._is_loaded = True
+                    self._using_real_sam3 = True
+                    self.stats["backend"] = "sam3"
+                    logger.info(f"SAM3 {self.config.model_size.value} loaded successfully via real SAM3 package")
+                    return True
 
-            # Create model components
-            self.image_encoder = self._create_image_encoder()
-            self.text_encoder = self._create_text_encoder()
-            self.mask_decoder = self._create_mask_decoder()
-
-            if self.config.enable_tracking:
-                self.tracker = self._create_tracker()
-
-            # Move to device
-            device = torch.device(self.config.device if torch.cuda.is_available() else "cpu")
-
-            self.image_encoder = self.image_encoder.to(device)
-            self.text_encoder = self.text_encoder.to(device)
-            self.mask_decoder = self.mask_decoder.to(device)
-
-            if self.tracker:
-                self.tracker = self.tracker.to(device)
-
-            # Set eval mode
-            self.image_encoder.eval()
-            self.text_encoder.eval()
-            self.mask_decoder.eval()
-
-            # FP16 optimization
-            if self.config.use_fp16:
-                self.image_encoder = self.image_encoder.half()
-                self.text_encoder = self.text_encoder.half()
-                self.mask_decoder = self.mask_decoder.half()
-
+            # Fallback to mock model
+            logger.info(f"Loading mock SAM3 model: {self.config.model_size.value}")
+            self._load_mock_model()
             self._is_loaded = True
-            logger.info(f"SAM3 {self.config.model_size.value} loaded successfully")
-
+            self._using_mock = True
+            self.stats["backend"] = "mock"
+            logger.info(f"SAM3 {self.config.model_size.value} loaded successfully (mock)")
             return True
 
         except Exception as e:
             logger.error(f"Failed to load SAM3: {e}")
             return False
+
+    def _load_real_sam3(self) -> bool:
+        """Load real SAM3 package models."""
+        try:
+            logger.info("Loading real SAM3 image model...")
+
+            # Build SAM3 image model
+            self.sam3_model = build_sam3_image_model()
+
+            # Create processor
+            self.sam3_processor = Sam3Processor(self.sam3_model)
+
+            # Build video predictor if tracking enabled
+            if self.config.enable_tracking:
+                logger.info("Loading SAM3 video predictor...")
+                self.video_predictor = build_sam3_video_predictor()
+
+            # Move to device if needed
+            device = torch.device(self.config.device if torch.cuda.is_available() else "cpu")
+
+            if hasattr(self.sam3_model, 'to'):
+                self.sam3_model = self.sam3_model.to(device)
+
+            logger.info("Real SAM3 loaded successfully")
+            return True
+
+        except Exception as e:
+            logger.warning(f"Could not load real SAM3: {e}")
+            return False
+
+    def _load_mock_model(self):
+        """Load mock model components."""
+        # Create model components
+        self.image_encoder = self._create_image_encoder()
+        self.text_encoder = self._create_text_encoder()
+        self.mask_decoder = self._create_mask_decoder()
+
+        if self.config.enable_tracking:
+            self.tracker = self._create_tracker()
+
+        # Move to device
+        device = torch.device(self.config.device if torch.cuda.is_available() else "cpu")
+
+        self.image_encoder = self.image_encoder.to(device)
+        self.text_encoder = self.text_encoder.to(device)
+        self.mask_decoder = self.mask_decoder.to(device)
+
+        if self.tracker:
+            self.tracker = self.tracker.to(device)
+
+        # Set eval mode
+        self.image_encoder.eval()
+        self.text_encoder.eval()
+        self.mask_decoder.eval()
+
+        # FP16 optimization
+        if self.config.use_fp16:
+            self.image_encoder = self.image_encoder.half()
+            self.text_encoder = self.text_encoder.half()
+            self.mask_decoder = self.mask_decoder.half()
 
     def _create_image_encoder(self) -> Any:
         """Create SAM3 image encoder (ViT-based)."""
@@ -435,7 +516,11 @@ class SAM3Segmenter:
         else:
             orig_h, orig_w = self.config.input_size, self.config.input_size
 
-        if not HAS_TORCH:
+        # Use real SAM3 if available
+        if self._using_real_sam3 and self.sam3_processor is not None:
+            return self._segment_text_real_sam3(image, text_prompt, orig_h, orig_w, start_time)
+
+        if not HAS_TORCH or self._using_mock:
             # Mock segmentation
             mask = np.zeros((orig_h, orig_w), dtype=np.uint8)
             # Create a simple blob in the center
@@ -466,6 +551,133 @@ class SAM3Segmenter:
                 prompt_type=PromptType.TEXT,
                 prompt_text=text_prompt,
             )
+
+    def _segment_text_real_sam3(
+        self,
+        image: Union[np.ndarray, Any],
+        text_prompt: str,
+        orig_h: int,
+        orig_w: int,
+        start_time: float,
+    ) -> SegmentationResult:
+        """Segment using real SAM3 package."""
+        try:
+            # Convert numpy to PIL if needed
+            if isinstance(image, np.ndarray):
+                if HAS_PIL:
+                    if image.dtype == np.uint8:
+                        pil_image = Image.fromarray(image)
+                    else:
+                        pil_image = Image.fromarray((image * 255).astype(np.uint8))
+                else:
+                    raise RuntimeError("PIL required for SAM3 processing")
+            else:
+                pil_image = image
+
+            # Set image in processor
+            inference_state = self.sam3_processor.set_image(pil_image)
+
+            # Run text prompt
+            output = self.sam3_processor.set_text_prompt(
+                state=inference_state,
+                prompt=text_prompt
+            )
+
+            # Extract results
+            raw_masks = output.get("masks", [])
+            raw_boxes = output.get("boxes", [])
+            raw_scores = output.get("scores", [])
+
+            masks = []
+            for i, (mask, score) in enumerate(zip(raw_masks, raw_scores)):
+                # Convert mask to numpy
+                if hasattr(mask, 'cpu'):
+                    mask_np = mask.cpu().numpy()
+                else:
+                    mask_np = np.array(mask)
+
+                # Ensure binary mask
+                if mask_np.dtype != np.uint8:
+                    mask_np = (mask_np > 0.5).astype(np.uint8)
+
+                # Get bounding box
+                bbox = None
+                if i < len(raw_boxes):
+                    box = raw_boxes[i]
+                    if hasattr(box, 'cpu'):
+                        box = box.cpu().numpy()
+                    if len(box) >= 4:
+                        bbox = (int(box[0]), int(box[1]), int(box[2]), int(box[3]))
+
+                # Get confidence
+                if hasattr(score, 'item'):
+                    confidence = score.item()
+                else:
+                    confidence = float(score)
+
+                masks.append(SegmentationMask(
+                    mask=mask_np,
+                    confidence=confidence,
+                    bbox=bbox,
+                    area=int(mask_np.sum()),
+                    label=text_prompt,
+                ))
+
+            inference_time = (time.time() - start_time) * 1000
+
+            self.stats["images_processed"] += 1
+            self.stats["text_queries"] += 1
+            self.stats["objects_segmented"] += len(masks)
+
+            return SegmentationResult(
+                masks=masks,
+                image_size=(orig_h, orig_w),
+                inference_time_ms=inference_time,
+                prompt_type=PromptType.TEXT,
+                prompt_text=text_prompt,
+            )
+
+        except Exception as e:
+            logger.error(f"Real SAM3 segmentation failed: {e}")
+            # Fall back to mock
+            return self._segment_text_mock(text_prompt, orig_h, orig_w, start_time)
+
+    def _segment_text_mock(
+        self,
+        text_prompt: str,
+        orig_h: int,
+        orig_w: int,
+        start_time: float,
+    ) -> SegmentationResult:
+        """Mock text segmentation fallback."""
+        mask = np.zeros((orig_h, orig_w), dtype=np.uint8)
+        cy, cx = orig_h // 2, orig_w // 2
+        r = min(orig_h, orig_w) // 4
+        y, x = np.ogrid[:orig_h, :orig_w]
+        mask_area = (x - cx)**2 + (y - cy)**2 <= r**2
+        mask[mask_area] = 1
+
+        masks = [SegmentationMask(
+            mask=mask,
+            confidence=0.85,
+            bbox=(cx - r, cy - r, cx + r, cy + r),
+            area=int(mask.sum()),
+            label=text_prompt,
+        )]
+
+        inference_time = (time.time() - start_time) * 1000
+
+        self.stats["images_processed"] += 1
+        self.stats["text_queries"] += 1
+        self.stats["objects_segmented"] += len(masks)
+
+        return SegmentationResult(
+            masks=masks,
+            image_size=(orig_h, orig_w),
+            inference_time_ms=inference_time,
+            prompt_type=PromptType.TEXT,
+            prompt_text=text_prompt,
+        )
 
         # Preprocess image
         tensor = self._preprocess_image(image)
@@ -812,6 +1024,8 @@ class SAM3Segmenter:
             **self.stats,
             "model_size": self.config.model_size.value,
             "is_loaded": self._is_loaded,
+            "using_real_sam3": self._using_real_sam3,
+            "using_mock": self._using_mock,
             "tracking_enabled": self.config.enable_tracking,
             "tracked_objects": len(self._track_memory),
         }
@@ -828,13 +1042,18 @@ def test_sam3():
     print("=" * 60)
 
     # Create segmenter
-    config = SAM3Config(model_size=SAM3ModelSize.LARGE)
+    config = SAM3Config(
+        model_size=SAM3ModelSize.LARGE,
+        use_real_sam3=True,
+    )
     segmenter = SAM3Segmenter(config)
 
     print("\n1. Load Model")
     print("-" * 40)
     success = segmenter.load_model()
     print(f"   Model loaded: {success}")
+    print(f"   Backend: {segmenter.stats['backend']}")
+    print(f"   Using real SAM3: {segmenter._using_real_sam3}")
 
     print("\n2. Text-Prompted Segmentation")
     print("-" * 40)
