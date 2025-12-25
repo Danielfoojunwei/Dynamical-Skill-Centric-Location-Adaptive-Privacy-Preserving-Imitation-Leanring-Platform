@@ -1,98 +1,127 @@
 """
-Pi0 VLA Model - Vision-Language-Action for Robot Control
+Pi0 VLA Models - Vision-Language-Action for Robot Control
 
-Pi0 is a diffusion-based VLA model that provides:
-- Multi-view image encoding
-- Language instruction processing
-- Flow-matching action generation
-- Proprioception integration
+This module provides VLA model implementations for robot control:
 
-Supported Backends:
-==================
-1. **Custom Pi0** (this module): Gemma 3 backbone with custom MoE
-2. **OpenPI Pi0.5**: Official Physical Intelligence implementation
+1. **Pi0.5 (RECOMMENDED)** - Official Physical Intelligence implementation
+   - Pre-trained on 10k+ hours of robot data
+   - Open-world generalization to unseen environments
+   - Use AS-IS from openpi library
 
-VLM Backbones:
-=============
-- PaliGemma 3B (legacy)
-- Gemma 3 4B/12B/27B (multimodal, recommended for Thor)
+2. **Legacy Pi0** - Custom implementation (EXPERIMENTAL)
+   - Uses PaliGemma 3B backbone only
+   - For development/research only
+   - NOT recommended for production
 
-Jetson Thor Optimizations:
-=========================
-With 128GB memory and 2070 TFLOPS:
-- Run Gemma 3-27B at full precision
-- 10Hz control loop with full perception
-- Native FP8 support for faster inference
+IMPORTANT: Use Pi0.5 for production deployments.
 
-Reference:
-- Physical Intelligence Pi0: https://www.physicalintelligence.company/blog/pi0
-- Pi0.5 Paper: https://arxiv.org/abs/2504.16054
-- Gemma 3: https://huggingface.co/blog/gemma3
+Installation (Pi0.5):
+    git clone --recurse-submodules https://github.com/Physical-Intelligence/openpi.git
+    cd openpi && pip install -e .
 
-Usage:
-    # Custom Pi0 with Gemma 3 backbone
-    from src.spatial_intelligence.pi0 import Pi0, Pi0Config, VLMBackbone
-
-    # For Jetson Thor (uses Gemma 3-27B)
-    model = Pi0.for_jetson_thor()
-
-    # Custom configuration
-    config = Pi0Config(
-        vlm_backbone=VLMBackbone.GEMMA3_12B,
-        action_dim=7,
-        action_horizon=16,
+Usage (Pi0.5 - Recommended):
+    from src.spatial_intelligence.pi0 import (
+        Pi05Model, Pi05Config, Pi05Variant, Pi05Observation
     )
-    model = Pi0.from_config(config)
 
-    # Official Pi0.5 via OpenPI
-    from src.spatial_intelligence.pi0 import Pi05Backend, Pi05Config, Pi05Variant
+    # Create and load model
+    model = Pi05Model.for_jetson_thor()
+    model.load()
 
-    backend = Pi05Backend(Pi05Config(variant=Pi05Variant.PI05_BASE))
-    backend.load()
-    actions = backend.infer(observation)
+    # Run inference
+    result = model.infer(Pi05Observation(
+        images=camera_images,
+        instruction="pick up the red cup"
+    ))
+    actions = result.actions
+
+References:
+- Pi0.5 Paper: https://arxiv.org/abs/2504.16054
+- OpenPI Repo: https://github.com/Physical-Intelligence/openpi
+- Blog: https://www.physicalintelligence.company/blog/pi05
 """
 
-from .model import Pi0, Pi0Config, VLMBackbone
-from .modules import (
-    ActionEncoder,
-    GemmaMoE,
-    MoeExpertConfig,
-    SinusoidalPosEmb,
-)
-
-# Try to import OpenPI backend
+# =============================================================================
+# Pi0.5 - Official Physical Intelligence (RECOMMENDED FOR PRODUCTION)
+# =============================================================================
 try:
-    from .openpi_backend import (
-        Pi05Backend,
+    from .pi05_model import (
+        Pi05Model,
         Pi05Config,
         Pi05Variant,
         Pi05Observation,
-        create_pi05_for_thor,
+        Pi05Result,
+        load_pi05,
+        list_variants,
+        check_installation,
+        HAS_OPENPI,
     )
-    HAS_OPENPI = True
-except ImportError:
+except ImportError as e:
+    import logging
+    logging.getLogger(__name__).warning(f"Pi0.5 model not available: {e}")
     HAS_OPENPI = False
-    Pi05Backend = None
+    Pi05Model = None
     Pi05Config = None
     Pi05Variant = None
     Pi05Observation = None
-    create_pi05_for_thor = None
+    Pi05Result = None
+    load_pi05 = None
+    list_variants = None
+    check_installation = None
+
+# =============================================================================
+# Legacy Pi0 - Custom Implementation (EXPERIMENTAL - NOT FOR PRODUCTION)
+# =============================================================================
+try:
+    from .model import Pi0, Pi0Config, VLMBackbone
+    from .modules import (
+        ActionEncoder,
+        GemmaMoE,
+        MoeExpertConfig,
+        SinusoidalPosEmb,
+    )
+    HAS_LEGACY_PI0 = True
+except ImportError:
+    HAS_LEGACY_PI0 = False
+    Pi0 = None
+    Pi0Config = None
+    VLMBackbone = None
+    ActionEncoder = None
+    GemmaMoE = None
+    MoeExpertConfig = None
+    SinusoidalPosEmb = None
+
+# =============================================================================
+# Backwards compatibility - redirect old imports to Pi0.5
+# =============================================================================
+# These were in the old openpi_backend.py - redirect to new pi05_model.py
+Pi05Backend = Pi05Model  # Alias for backwards compatibility
+create_pi05_for_thor = lambda: Pi05Model.for_jetson_thor() if Pi05Model else None
+
 
 __all__ = [
-    # Core Pi0 with Gemma 3
+    # Pi0.5 Official (RECOMMENDED)
+    'Pi05Model',
+    'Pi05Config',
+    'Pi05Variant',
+    'Pi05Observation',
+    'Pi05Result',
+    'load_pi05',
+    'list_variants',
+    'check_installation',
+    'HAS_OPENPI',
+
+    # Backwards compatibility
+    'Pi05Backend',
+    'create_pi05_for_thor',
+
+    # Legacy Custom Pi0 (EXPERIMENTAL)
     'Pi0',
     'Pi0Config',
     'VLMBackbone',
-    # MoE components
     'ActionEncoder',
     'GemmaMoE',
     'MoeExpertConfig',
     'SinusoidalPosEmb',
-    # OpenPI Pi0.5 (if available)
-    'Pi05Backend',
-    'Pi05Config',
-    'Pi05Variant',
-    'Pi05Observation',
-    'create_pi05_for_thor',
-    'HAS_OPENPI',
+    'HAS_LEGACY_PI0',
 ]

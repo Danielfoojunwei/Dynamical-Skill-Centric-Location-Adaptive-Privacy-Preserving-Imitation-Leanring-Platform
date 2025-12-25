@@ -72,6 +72,10 @@ try:
     HAS_MOE = True
 except ImportError:
     HAS_MOE = False
+    CloudSkillService = None
+    MoESkillRouter = None
+    SkillRequest = None
+    SkillResponse = None
     logger.warning("MoE skill router not available")
 
 try:
@@ -82,6 +86,11 @@ try:
     HAS_INVOKER = True
 except ImportError:
     HAS_INVOKER = False
+    RobotSkillInvoker = None
+    SkillInvocationRequest = None
+    SkillInvocationResult = None
+    ObservationState = None
+    InvocationMode = None
     logger.warning("Robot skill invoker not available")
 
 
