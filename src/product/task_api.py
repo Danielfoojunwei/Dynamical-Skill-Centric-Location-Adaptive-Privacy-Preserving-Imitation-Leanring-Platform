@@ -15,7 +15,7 @@ Features:
 Powered By:
 ==========
 - Pi0.5: Vision-Language-Action with open-world generalization
-- Gemma 3-27B: Multimodal understanding with 128k context
+- Meta AI: DINOv3, SAM3, V-JEPA 2 perception models
 - Jetson Thor: 10Hz control with full perception pipeline
 
 Usage:

@@ -15,7 +15,6 @@ Features:
 Powered By:
 ==========
 - Pi0.5: Semantic subtask prediction from training
-- Gemma 3-27B: Complex instruction understanding with 128k context
 - V-JEPA 2: Video prediction for action planning
 
 Usage:

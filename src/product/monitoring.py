@@ -93,7 +93,7 @@ class RobotStatus:
 
     # AI Status
     vla_loaded: bool = True
-    vla_model: str = "pi05_gemma3_27b"
+    vla_model: str = "pi05_base"
     inference_time_ms: float = 10.0
     control_frequency_hz: float = 10.0
 

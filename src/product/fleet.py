@@ -13,8 +13,7 @@ Features:
 
 Powered By:
 ==========
-- Pi0.5: Cross-robot skill transfer
-- Gemma 3: Complex multi-agent planning
+- Pi0.5: Cross-robot skill transfer and complex multi-agent planning
 - Jetson Thor: Edge-native fleet coordination
 
 Usage:
@@ -94,7 +93,7 @@ class RobotProfile:
     position: Dict[str, float] = field(default_factory=lambda: {"x": 0, "y": 0, "z": 0})
 
     # Model info
-    vla_model: str = "pi05_gemma3_27b"
+    vla_model: str = "pi05_base"
 
     # Registration
     registered_at: datetime = field(default_factory=datetime.now)

@@ -15,7 +15,6 @@ Features:
 Powered By:
 ==========
 - Pi0.5: Pre-trained on 10k+ hours, generalizes to new environments
-- Gemma 3: 128k context for complex environment understanding
 
 Usage:
     from src.product import DeploymentService
@@ -115,7 +114,7 @@ class DeploymentConfig:
     # Model configuration
     use_pi05: bool = True  # Use Pi0.5 for open-world generalization
     pi05_variant: str = "pi05_base"
-    vlm_backbone: str = "gemma3_27b"
+    vlm_backend: str = "pi05"  # Pi0.5 uses its own backbone
 
     # Optimization
     use_tensorrt: bool = True

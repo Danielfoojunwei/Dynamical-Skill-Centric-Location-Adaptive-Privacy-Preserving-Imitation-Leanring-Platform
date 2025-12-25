@@ -1,14 +1,17 @@
 """
-Spatial Intelligence Module - Vision-Language-Action Models
+Spatial Intelligence Module - Pi0.5 Vision-Language-Action Model
 
-This module provides spatial reasoning capabilities through:
-- Pi0.5 VLA model (RECOMMENDED) - Official Physical Intelligence implementation
-- Legacy Pi0 model (EXPERIMENTAL) - Custom implementation requiring PyTorch
+This module provides spatial reasoning capabilities through Pi0.5,
+the official VLA model from Physical Intelligence.
 
-Components:
-- pi0/: Pi0 Vision-Language-Action model implementations
+Pi0.5 Features:
+- Pre-trained on 10k+ hours of robot data
+- Open-world generalization to unseen environments
+- Semantic task understanding
+- Multi-camera support
+- Proprioceptive conditioning
 
-Usage (Pi0.5 - Recommended):
+Usage:
     from src.spatial_intelligence.pi0 import (
         Pi05Model, Pi05Config, Pi05Observation
     )
@@ -16,13 +19,6 @@ Usage (Pi0.5 - Recommended):
     model = Pi05Model.for_jetson_thor()
     model.load()
     result = model.infer(Pi05Observation(images=img, instruction="pick up cup"))
-
-Usage (Legacy - Requires PyTorch):
-    from src.spatial_intelligence.pi0 import Pi0, Pi0Config
-
-    config = Pi0Config(action_dim=7)
-    model = Pi0(config)
-    actions = model.sample_actions(images, instruction, proprio)
 """
 
 import logging
@@ -30,7 +26,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 # =============================================================================
-# Pi0.5 - Official Physical Intelligence (RECOMMENDED)
+# Pi0.5 - Official Physical Intelligence Implementation
 # =============================================================================
 try:
     from .pi0 import (
@@ -57,32 +53,27 @@ except ImportError as e:
     check_installation = None
 
 # =============================================================================
-# Legacy Pi0 - Custom Implementation (EXPERIMENTAL - requires PyTorch)
+# VLA Interface
 # =============================================================================
 try:
-    from .pi0 import (
-        Pi0,
-        Pi0Config,
-        VLMBackbone,
-        HAS_LEGACY_PI0,
-    )
-    from .pi0.modules import (
-        VisionEncoder,
-        LanguageEncoder,
-        ActionDecoder,
+    from .vla_interface import (
+        VLAInterface,
+        VLAConfig,
+        VLAObservation,
+        VLAResult,
+        HardwareTarget,
     )
 except ImportError as e:
-    logger.debug(f"Legacy Pi0 not available (PyTorch required): {e}")
-    HAS_LEGACY_PI0 = False
-    Pi0 = None
-    Pi0Config = None
-    VLMBackbone = None
-    VisionEncoder = None
-    LanguageEncoder = None
-    ActionDecoder = None
+    logger.debug(f"VLA interface not available: {e}")
+    VLAInterface = None
+    VLAConfig = None
+    VLAObservation = None
+    VLAResult = None
+    HardwareTarget = None
+
 
 __all__ = [
-    # Pi0.5 Official (RECOMMENDED)
+    # Pi0.5 Official
     'Pi05Model',
     'Pi05Config',
     'Pi05Variant',
@@ -93,12 +84,10 @@ __all__ = [
     'check_installation',
     'HAS_OPENPI',
 
-    # Legacy Custom Pi0 (EXPERIMENTAL)
-    'Pi0',
-    'Pi0Config',
-    'VLMBackbone',
-    'VisionEncoder',
-    'LanguageEncoder',
-    'ActionDecoder',
-    'HAS_LEGACY_PI0',
+    # VLA Interface
+    'VLAInterface',
+    'VLAConfig',
+    'VLAObservation',
+    'VLAResult',
+    'HardwareTarget',
 ]

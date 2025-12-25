@@ -1,21 +1,18 @@
 """
 Multi-Language Support Service
 
-Natural language task specification in 140+ languages, powered by
-Gemma 3's native multilingual capabilities.
+Natural language task specification in 140+ languages.
 
 Features:
 =========
 - 140+ language support out-of-the-box
-- No translation API required (native understanding)
 - Automatic language detection
 - Cross-language skill transfer
 - Culturally-aware task interpretation
 
 Powered By:
 ==========
-- Gemma 3: Native support for 140+ languages
-- Pi0.5: Language-agnostic action generation
+- Pi0.5: Language-agnostic action generation with multilingual understanding
 
 Supported Language Families:
 ===========================
@@ -148,7 +145,7 @@ class LanguageCapability:
     """Language capability information."""
     language: LanguageCode
     display_name: str
-    native_support: bool = True  # Gemma 3 native, no translation needed
+    native_support: bool = True  # Pi0.5 native multilingual support
     speech_support: bool = False  # Future: speech recognition
     text_support: bool = True
 
@@ -158,7 +155,7 @@ class MultilingualService:
     Multi-Language Support Service.
 
     Enables natural language task specification in 140+ languages
-    using Gemma 3's native multilingual capabilities.
+    using Pi0.5's multilingual capabilities.
     """
 
     def __init__(self):
@@ -226,7 +223,7 @@ class MultilingualService:
         """
         Process instruction in any language.
 
-        Gemma 3 understands 140+ languages natively, so no translation
+        Pi0.5 understands 140+ languages natively, so no translation
         is required. This method just normalizes and prepares the instruction.
 
         Args:
@@ -251,7 +248,7 @@ class MultilingualService:
             original_text=instruction,
             detected_language=detected,
             confidence=confidence,
-            normalized_text=instruction,  # Gemma 3 handles natively
+            normalized_text=instruction,  # Pi0.5 handles natively
             semantic_intent=None,  # Would be extracted by VLA
         )
 

@@ -15,8 +15,8 @@ Product Features:
 
 Powered By:
 ==========
-- Pi0.5: Open-world generalization VLA
-- Gemma 3-27B: 128k context multimodal understanding
+- Pi0.5: Open-world generalization VLA from Physical Intelligence
+- Meta AI: DINOv3, SAM3, V-JEPA 2 perception models
 - Jetson Thor: 128GB memory, 2070 TFLOPS
 
 Usage:
