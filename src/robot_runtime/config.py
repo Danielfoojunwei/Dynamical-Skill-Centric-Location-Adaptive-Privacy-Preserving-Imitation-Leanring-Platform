@@ -117,19 +117,50 @@ class PerceptionConfig:
 
 @dataclass
 class PolicyConfig:
-    """Policy executor configuration."""
-    # Default policy model
-    default_model: str = "pi0_small"
-    default_model_tflops: float = 20.0
+    """
+    Policy executor configuration.
+
+    Uses Pi0.5 OpenPI: Official Physical Intelligence implementation.
+
+    Jetson Thor enables running the full Pi0.5 model with:
+    - Open-world generalization
+    - 10Hz control with full perception pipeline
+    """
+    # Pi0.5 configuration
+    pi05_variant: str = "pi05_base"  # Options: pi0_base, pi05_base, pi05_libero, pi05_droid
+
+    # Default model
+    default_model: str = "pi05_base"
+    default_model_tflops: float = 50.0  # Thor has more compute
 
     # Action space
     action_dim: int = 7  # 6-DOF + gripper
+    action_horizon: int = 16  # Action prediction horizon
     max_action_norm: float = 1.0
 
     # Inference
     use_tensorrt: bool = True
+    use_fp8: bool = False  # Set True for Jetson Thor
+    use_flash_attention: bool = True
     batch_size: int = 1
     precision: str = "fp16"
+
+    # Inference timing (milliseconds)
+    max_inference_time_ms: float = 100.0  # 10Hz control
+
+    def for_jetson_thor(self) -> 'PolicyConfig':
+        """Configure for Jetson Thor."""
+        self.pi05_variant = "pi05_base"
+        self.use_fp8 = True
+        self.default_model_tflops = 100.0
+        return self
+
+    def for_jetson_orin(self) -> 'PolicyConfig':
+        """Configure for Jetson AGX Orin."""
+        self.pi05_variant = "pi05_base"
+        self.use_fp8 = False
+        self.default_model_tflops = 50.0
+        return self
 
 
 @dataclass
@@ -200,12 +231,42 @@ class RobotRuntimeConfig:
 
     @classmethod
     def for_jetson_thor(cls) -> 'RobotRuntimeConfig':
-        """Configuration optimized for Jetson Thor (Blackwell)."""
+        """
+        Configuration optimized for Jetson Thor (Blackwell).
+
+        Jetson Thor Specifications:
+        - 128GB LPDDR5X memory
+        - 2070 FP4 TFLOPS / 517 FP8 TFLOPS
+        - Native FP8 support
+
+        This enables:
+        - Pi0.5 with open-world generalization
+        - 10Hz control with full perception pipeline
+        """
         config = cls()
-        # Thor has 2070 FP4 TFLOPS
+
+        # Thor has 2070 FP4 TFLOPS / 517 FP8 TFLOPS
         config.tier2.perception_rate_hz = 60  # Can run faster
         config.tier2.policy_rate_hz = 200     # Can run faster
-        config.policy.precision = "fp4"
+
+        # VLA configuration for Thor (Pi0.5)
+        config.policy.pi05_variant = "pi05_base"
+        config.policy.use_fp8 = True
+        config.policy.use_flash_attention = True
+        config.policy.precision = "fp8"
+
+        # Perception can use larger models
+        config.perception.level2_models = [
+            "dinov3_giant",       # Giant vision encoder
+            "sam3_large",         # Large segmentation
+            "rtmpose_x",          # X-Large pose
+        ]
+        config.perception.level3_models = [
+            "dinov3_giant",       # Already included in level 2
+            "sam3_huge",          # Huge segmentation
+            "vjepa2_giant",       # Giant world model
+        ]
+
         return config
 
     @classmethod

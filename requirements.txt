@@ -1,18 +1,73 @@
 # =============================================================================
-# Dynamical Edge Platform v0.3.2 Dependencies
+# Dynamical Edge Platform v0.8.0 Dependencies
+# Optimized for NVIDIA Jetson Thor (128GB, 2070 TFLOPS)
 # =============================================================================
 
 # Core ML
-torch>=2.0.0
-torchvision>=0.15.0
+torch>=2.7.0                # Required for SAM3, V-JEPA 2, Pi0.5
+torchvision>=0.18.0
 numpy>=1.24.0
 
-# Hugging Face / Pi0 / VLA Models
-transformers>=4.38.0
+# Hugging Face / VLA Models
+transformers>=4.56.0        # Required for Gemma 3, DINOv3
 accelerate>=0.27.0
 protobuf
 safetensors
 sentencepiece
+
+# =============================================================================
+# VLA Models (Pi0.5 + Gemma 3)
+# =============================================================================
+# Pi0.5 - Vision-Language-Action Model from Physical Intelligence
+# Repository: https://github.com/Physical-Intelligence/openpi
+# Paper: https://arxiv.org/abs/2504.16054
+# -----------------------------------------------------------------------------
+# Installation (requires uv package manager):
+#   git clone --recurse-submodules https://github.com/Physical-Intelligence/openpi.git
+#   cd openpi && pip install -e .
+#
+# Available checkpoints:
+#   - pi0_base: Original Pi0 base model
+#   - pi0_fast_base: Fast inference variant
+#   - pi05_base: Pi0.5 with open-world generalization
+#   - pi05_libero: Fine-tuned for LIBERO benchmark (SOTA)
+#   - pi05_droid: Fine-tuned on DROID dataset
+#
+# Example usage:
+#   from openpi.training import config
+#   from openpi.policies import policy_config
+#   cfg = config.get_config("pi05_base")
+#   policy = policy_config.create_trained_policy(cfg, checkpoint_dir)
+#   actions = policy.infer(observation)["actions"]
+
+# -----------------------------------------------------------------------------
+# Gemma 3 - Google's Multimodal Language Model
+# Repository: https://huggingface.co/collections/google/gemma-3-release
+# Blog: https://huggingface.co/blog/gemma3
+# -----------------------------------------------------------------------------
+# Gemma 3 model sizes:
+#   - google/gemma-3-270m-it: 270M params (text-only, ~1GB)
+#   - google/gemma-3-1b-it: 1B params (text-only, ~2GB)
+#   - google/gemma-3-4b-it: 4B params (multimodal, ~8GB) - Recommended for Orin
+#   - google/gemma-3-12b-it: 12B params (multimodal, ~24GB)
+#   - google/gemma-3-27b-it: 27B params (multimodal, ~54GB) - Recommended for Thor
+#
+# Features:
+#   - 128k context window
+#   - Native image+text multimodal
+#   - 140+ language support
+#
+# Example usage:
+#   from transformers import AutoProcessor, Gemma3ForConditionalGeneration
+#   model = Gemma3ForConditionalGeneration.from_pretrained(
+#       "google/gemma-3-27b-it",
+#       torch_dtype=torch.float16,
+#       attn_implementation="flash_attention_2"
+#   )
+
+# Jetson Thor optimizations
+# flash-attn>=2.5.0         # Flash Attention 2 for faster inference
+# transformer-engine>=1.0   # FP8 support for Blackwell GPUs
 
 # =============================================================================
 # Pose Estimation (RTMPose)
@@ -101,23 +156,74 @@ pytest-asyncio>=0.21.0
 # =============================================================================
 # Meta AI Models (DINOv3, SAM3, V-JEPA 2)
 # =============================================================================
-# These models require torch hub or manual download from Meta's repos
+# These models can be loaded via:
+# 1. HuggingFace Transformers (recommended for DINOv3)
+# 2. PyTorch Hub (recommended for V-JEPA 2)
+# 3. Direct package installation (required for SAM3)
 
-# DINOv3 dependencies
+# -----------------------------------------------------------------------------
+# DINOv3 - Self-Supervised Vision Foundation Model
+# Repository: https://github.com/facebookresearch/dinov3
+# -----------------------------------------------------------------------------
+# Option A: HuggingFace (easiest - no extra install needed)
+#   from transformers import AutoImageProcessor, AutoModel
+#   model = AutoModel.from_pretrained("facebook/dinov3-vitl16-pretrain-lvd1689m")
+#
+# Option B: PyTorch Hub
+#   model = torch.hub.load('facebookresearch/dinov3', 'dinov3_vitl16')
+#
+# Option C: Clone repository for full API
+#   git clone https://github.com/facebookresearch/dinov3
+#   pip install -e dinov3/
+
 timm>=0.9.0                 # Vision transformer implementations
 
-# SAM3 dependencies
-# Install from: github.com/facebookresearch/sam3
-# pip install git+https://github.com/facebookresearch/sam3.git
+# -----------------------------------------------------------------------------
+# SAM3 - Segment Anything Model 3 (Text-Driven Segmentation)
+# Repository: https://github.com/facebookresearch/sam3
+# Requires: Python 3.12+, PyTorch 2.7+, CUDA 12.6+
+# -----------------------------------------------------------------------------
+# Installation:
+#   pip install git+https://github.com/facebookresearch/sam3.git
+#
+# Or clone for development:
+#   git clone https://github.com/facebookresearch/sam3
+#   cd sam3 && pip install -e .
+#
+# NOTE: SAM3 checkpoints require HuggingFace authentication:
+#   huggingface-cli login
+#   # Request access at: https://huggingface.co/facebook/sam3
 
-# V-JEPA 2 dependencies
-# Install from: github.com/facebookresearch/vjepa2
-# pip install git+https://github.com/facebookresearch/vjepa2.git
+# -----------------------------------------------------------------------------
+# V-JEPA 2 - Video World Model for Robotics
+# Repository: https://github.com/facebookresearch/vjepa2
+# -----------------------------------------------------------------------------
+# Option A: PyTorch Hub (easiest)
+#   processor = torch.hub.load('facebookresearch/vjepa2', 'vjepa2_preprocessor')
+#   model = torch.hub.load('facebookresearch/vjepa2', 'vjepa2_vit_giant')
+#
+# Option B: HuggingFace
+#   from transformers import AutoVideoProcessor, AutoModel
+#   model = AutoModel.from_pretrained("facebook/vjepa2-vitg-fpc64-256")
+#
+# Option C: Clone for action-conditioned model (robotics)
+#   git clone https://github.com/facebookresearch/vjepa2
+#   pip install -e vjepa2/
+#
+# Action-conditioned model for robot planning:
+#   encoder, ac_predictor = torch.hub.load('facebookresearch/vjepa2', 'vjepa2_ac_vit_giant')
+
+# NOTE for macOS: V-JEPA 2 requires decord for video. Use eva-decord or decord2:
+#   pip install eva-decord
 
 # Shared dependencies for Meta AI models
 einops>=0.6.0               # Tensor operations
 ftfy>=6.1.0                 # Text processing for CLIP-style models
 regex>=2023.0               # Text tokenization
 
-# Optional: Flash Attention for faster inference
+# Optional: Flash Attention for faster inference (Linux only)
 # pip install flash-attn --no-build-isolation
+
+# Optional: Decord for video loading (V-JEPA 2)
+# pip install decord  # Linux/Windows
+# pip install eva-decord  # macOS

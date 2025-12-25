@@ -379,6 +379,15 @@ class ThorModelConfig:
 
     With 7.5x more compute and 2x memory, we can run
     significantly larger and more capable models.
+
+    Jetson Thor Specifications:
+    - Memory: 128GB LPDDR5X
+    - AI Compute: 2070 FP4 TFLOPS
+    - Native FP8 support via Blackwell
+
+    This enables:
+    - Pi0.5 with open-world generalization
+    - 10Hz control with full perception pipeline
     """
     # Vision backbone - use Giant instead of Base
     dinov3_variant: str = "vitg16"  # Was vitb16 on Orin
@@ -397,8 +406,20 @@ class ThorModelConfig:
     vjepa2_variant: str = "vit_giant_384"  # Was vit_large on Orin
     vjepa2_action_conditioned: bool = True
 
-    # VLA - use Large
-    vla_variant: str = "pi0_large"  # Was pi0_base on Orin
+    # ==========================================================================
+    # VLA Configuration (Pi0.5)
+    # ==========================================================================
+
+    # Pi0.5 OpenPI configuration
+    pi05_variant: str = "pi05_base"  # Options: pi0_base, pi05_base, pi05_libero, pi05_droid
+    pi05_use_tensorrt: bool = True
+    pi05_use_fp8: bool = True
+    pi05_action_dim: int = 7
+    pi05_action_horizon: int = 16
+
+    # ==========================================================================
+    # LLM Configuration
+    # ==========================================================================
 
     # Enable LLM reasoning (new with Thor!)
     enable_llm: bool = True
@@ -409,6 +430,42 @@ class ThorModelConfig:
     enable_world_model: bool = True
     world_model: str = "vjepa2_ac"
 
+    # ==========================================================================
+    # Memory Budget (128GB total)
+    # ==========================================================================
+
+    def get_memory_allocation(self) -> Dict[str, float]:
+        """Get recommended memory allocation for Thor's 128GB."""
+        base_allocation = {
+            # Perception models (~20GB)
+            "dinov3_vitg": 8.0,
+            "sam3_large": 6.0,
+            "depth_large": 2.0,
+            "rtmpose_x": 1.0,
+            "vjepa2_giant": 10.0,
+
+            # Pi0.5 uses ~32GB for full model
+            "pi05": 32.0,
+
+            # System overhead
+            "system": 8.0,
+            "cache": 10.0,
+        }
+
+        # Add LLM if enabled
+        if self.enable_llm:
+            base_allocation["llm"] = 16.0  # 8B quantized
+
+        return base_allocation
+
+    def get_total_memory_gb(self) -> float:
+        """Get total memory required."""
+        return sum(self.get_memory_allocation().values())
+
+    def validate_memory(self) -> bool:
+        """Check if configuration fits in Thor's 128GB."""
+        return self.get_total_memory_gb() <= 120.0  # Leave 8GB for system
+
     def get_model_list(self) -> List[str]:
         """Get list of all enabled models."""
         models = [
@@ -417,11 +474,24 @@ class ThorModelConfig:
             f"depth_{self.depth_variant}",
             self.pose_variant,
             f"vjepa2_{self.vjepa2_variant}",
-            f"vla_{self.vla_variant}",
+            f"pi05_{self.pi05_variant}",
         ]
+
         if self.enable_llm:
             models.append(self.llm_model)
+
         return models
+
+    def get_vla_config(self) -> Dict[str, Any]:
+        """Get VLA configuration for initialization."""
+        return {
+            "backend": "pi05_openpi",
+            "variant": self.pi05_variant,
+            "use_tensorrt": self.pi05_use_tensorrt,
+            "use_fp8": self.pi05_use_fp8,
+            "action_dim": self.pi05_action_dim,
+            "action_horizon": self.pi05_action_horizon,
+        }
 
 
 # Global model config for Thor
