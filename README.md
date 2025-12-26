@@ -18,29 +18,53 @@ A production-grade robotics platform that enables humanoid robots to learn manip
 │                         DYNAMICAL EDGE PLATFORM v0.9.0                           │
 ├─────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                  │
-│  HUMAN DEMONSTRATION                           ROBOT EXECUTION                   │
-│  ┌────────────────────┐                       ┌────────────────────┐            │
-│  │  ONVIF Cameras     │                       │  Jetson Thor       │            │
-│  │  MANUS/DYGlove     │ ─────────────────────>│  (Edge Compute)    │            │
-│  │  3D Pose Capture   │    Imitation          │                    │            │
-│  └────────────────────┘    Learning           └─────────┬──────────┘            │
-│                                                         │                        │
-│                              ┌──────────────────────────┼──────────────────────┐│
-│                              │         SAFETY STACK (Deterministic)            ││
-│                              │  ┌─────────────┐  ┌─────────────┐  ┌──────────┐ ││
-│                              │  │ CBF Filter  │  │ RTA Simplex │  │ E-Stop   │ ││
-│                              │  │ (1kHz)      │  │ (100Hz)     │  │ (HW)     │ ││
-│                              │  └─────────────┘  └─────────────┘  └──────────┘ ││
-│                              └──────────────────────────┼──────────────────────┘│
-│                                                         │                        │
-│                                                         ▼                        │
-│                                               ┌────────────────────┐            │
-│                                               │   ROBOT CONTROL    │            │
-│                                               │   (200Hz)          │            │
-│                                               └────────────────────┘            │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐│
+│  │                              CLOUD LAYER                                    ││
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐        ││
+│  │  │ Skill       │  │ Federated   │  │ MoE Router  │  │ MOAI FHE    │        ││
+│  │  │ Library     │  │ Learning    │  │ (Training)  │  │ (Offline)   │        ││
+│  │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘        ││
+│  └────────────────────────────────────────┬────────────────────────────────────┘│
+│                                           │ Skill Sync / Updates                │
+│  ┌────────────────────────────────────────┼────────────────────────────────────┐│
+│  │                        EDGE COMPUTE (Jetson Thor)                           ││
+│  │  ┌─────────────┐  ┌─────────────┐  ┌───▼─────────┐  ┌─────────────┐        ││
+│  │  │ ONVIF       │  │ DYGlove/    │  │ Skill Cache │  │ Pi0.5 VLA   │        ││
+│  │  │ Cameras     │  │ MANUS       │  │ (Local MoE) │  │ Inference   │        ││
+│  │  └──────┬──────┘  └──────┬──────┘  └─────────────┘  └─────────────┘        ││
+│  │         │                │                                                  ││
+│  │         └────────┬───────┘                                                  ││
+│  │                  │ Sensor Data                                              ││
+│  └──────────────────┼──────────────────────────────────────────────────────────┘│
+│                     │                                                            │
+│  ┌──────────────────┼──────────────────────────────────────────────────────────┐│
+│  │                  │          ROBOT (Onboard Compute)                         ││
+│  │                  ▼                                                          ││
+│  │  ┌─────────────────────────────────────────────────────────────────────┐   ││
+│  │  │                    SAFETY STACK (Deterministic)                      │   ││
+│  │  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌────────────┐  │   ││
+│  │  │  │ CBF Filter  │  │ RTA Simplex │  │ Safety      │  │ Hardware   │  │   ││
+│  │  │  │ (1kHz)      │  │ (100Hz)     │  │ Shield      │  │ E-Stop     │  │   ││
+│  │  │  └─────────────┘  └─────────────┘  └─────────────┘  └────────────┘  │   ││
+│  │  └─────────────────────────────────────────────────────────────────────┘   ││
+│  │                              │                                              ││
+│  │                              ▼                                              ││
+│  │                    ┌────────────────────┐                                   ││
+│  │                    │   MOTOR CONTROL    │                                   ││
+│  │                    │   (200Hz)          │                                   ││
+│  │                    └────────────────────┘                                   ││
+│  └─────────────────────────────────────────────────────────────────────────────┘│
 │                                                                                  │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
+
+### Deployment Architecture
+
+| Layer | Hardware | Responsibilities |
+|-------|----------|------------------|
+| **Cloud** | AWS/GCP servers | Skill Library, Federated Learning, MoE training, MOAI FHE |
+| **Edge** | NVIDIA Jetson Thor | VLA inference, perception, skill caching, data collection |
+| **Robot** | Onboard compute | Safety (CBF/RTA), motor control, sensor fusion |
 
 ---
 
@@ -102,10 +126,49 @@ The platform operates on a strict timing hierarchy where higher tiers cannot ove
 |-----------|----------|---------|
 | **UnifiedSkillOrchestrator** | `src/core/unified_skill_orchestrator.py` | Task decomposition, MoE routing, robot assignment |
 | **RobotSkillInvoker** | `src/core/robot_skill_invoker.py` | 200Hz skill execution on edge |
+| **MoESkillRouter** | `src/platform/cloud/moe_skill_router.py` | Skill selection via Mixture-of-Experts |
+| **SkillLibraryClient** | `src/platform/cloud/model_client.py` | Cloud skill library access |
 | **CBFFilter** | `src/safety/cbf/filter.py` | Deterministic safety via Control Barrier Functions |
 | **RTASimplex** | `src/safety/rta/simplex.py` | Learned ↔ Baseline controller switching |
 | **DeepImitativeLearning** | `src/spatial_intelligence/deep_imitative_learning.py` | Pi0.5 + Diffusion + RIP pipeline |
 | **IntegratedPipeline** | `src/pipeline/integrated_pipeline.py` | End-to-end data processing |
+
+### Skill Library Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                           SKILL LIBRARY SYSTEM                                   │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  CLOUD (Skill Library)                                                          │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐│
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐        ││
+│  │  │ skill_grasp │  │ skill_pour  │  │ skill_place │  │ skill_...   │        ││
+│  │  │ (MoE Expert)│  │ (MoE Expert)│  │ (MoE Expert)│  │ (MoE Expert)│        ││
+│  │  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘        ││
+│  │                                                                              ││
+│  │  EncryptedSkillStorage (N2HE, 128-bit security)                             ││
+│  └─────────────────────────────────────────────────────────────────────────────┘│
+│                              │                                                   │
+│                              │ Sync (gRPC + TLS)                                │
+│                              ▼                                                   │
+│  EDGE (Skill Cache)                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐│
+│  │  EdgeSkillClient                                                            ││
+│  │  ├─ Local cache: /var/lib/dynamical/skill_cache                             ││
+│  │  ├─ Max size: 1GB (configurable)                                            ││
+│  │  ├─ Preloaded skills for low-latency execution                              ││
+│  │  └─ Automatic sync on network reconnection                                  ││
+│  └─────────────────────────────────────────────────────────────────────────────┘│
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+Skills are:
+- **MoE Experts**: Each skill is a Mixture-of-Experts expert trained on specific manipulation primitives
+- **Encrypted at Rest**: N2HE (LWE-based) homomorphic encryption in cloud storage
+- **Cached Locally**: Downloaded to edge device for low-latency execution
+- **Privacy-Preserving**: Trained via federated learning, gradients never leave edge unencrypted
 
 ---
 
@@ -303,26 +366,58 @@ class CBFFilter:
 
 ## Hardware Requirements
 
+### Edge Compute (Jetson Thor - Separate from Robot)
 | Component | Specification | Used For |
 |-----------|--------------|----------|
-| **Platform** | NVIDIA Jetson Thor | Primary edge compute |
-| **CPU** | ARM Cortex-A78AE (12-core) | Safety loop (1kHz) |
-| **GPU** | NVIDIA Blackwell | VLA inference (10Hz) |
-| **Memory** | 128GB LPDDR5X | Model loading |
+| **Platform** | NVIDIA Jetson Thor | Edge inference, skill caching |
+| **CPU** | ARM Cortex-A78AE (12-core) | Orchestration, data processing |
+| **GPU** | NVIDIA Blackwell (800 TFLOPS) | VLA inference, perception |
+| **Memory** | 128GB LPDDR5X | Model loading, skill cache |
+
+### Robot (Onboard Compute)
+| Component | Specification | Used For |
+|-----------|--------------|----------|
+| **Safety MCU** | ARM Cortex-R (dedicated) | CBF/RTA @ 1kHz |
+| **Control CPU** | Real-time processor | Motor control @ 200Hz |
+| **Hardware E-Stop** | Physical switch | Emergency stop (independent) |
+
+### Peripherals
+| Component | Specification | Used For |
+|-----------|--------------|----------|
 | **Cameras** | ONVIF PTZ | Multi-angle capture |
-| **Gloves** | DYGlove / MANUS | Hand tracking |
+| **Gloves** | DYGlove / MANUS | Hand tracking, teleoperation |
+| **Network** | Ethernet/WiFi | Cloud sync (not required for operation) |
 
 ---
 
-## Network Failure Behavior
+## Cloud vs Edge Dependencies
 
-The platform is designed for **indefinite operation without network connectivity**:
+### What Requires Cloud
+| Feature | Cloud Dependency | Notes |
+|---------|------------------|-------|
+| **Skill Library** | Required | MoE skills stored in cloud, synced to edge cache |
+| **Federated Learning** | Required | Privacy-preserving training across fleet |
+| **New Skill Training** | Required | Skills trained in cloud, deployed to edge |
+| **MOAI FHE** | Required | Homomorphic encryption processing (~60s/inference) |
+| **Fleet Management** | Required | Multi-robot coordination, skill distribution |
 
-1. **Safety**: Runs entirely on edge CPU (no cloud dependency)
-2. **Control**: Cached TensorRT models continue execution
-3. **Perception**: Local models (DINOv3-B, SAM3) provide basic perception
-4. **Skills**: Cached skills continue working; new skills sync when network returns
-5. **Telemetry**: Buffered locally, uploaded when connection restored
+### What Works Offline (Degraded Mode)
+| Feature | Offline Capability | Notes |
+|---------|-------------------|-------|
+| **Safety (CBF/RTA)** | Full | Runs on robot onboard compute, no network needed |
+| **Cached Skills** | Full | Previously synced skills continue working |
+| **VLA Inference** | Full | Pi0.5 runs on Jetson Thor edge compute |
+| **Basic Perception** | Full | DINOv3-B, SAM3 cached on edge |
+| **Motor Control** | Full | 200Hz control loop on robot |
+| **Telemetry** | Buffered | Stored locally, uploaded when connection restored |
+
+### Network Failure Behavior
+When network connectivity is lost:
+1. **Robot continues operating** with cached skills (no new skill learning)
+2. **Safety stack unaffected** (runs entirely on robot hardware)
+3. **Telemetry buffered** locally until connection restored
+4. **No skill updates** until network returns
+5. **Federated learning paused** until fleet reconnects
 
 ---
 
