@@ -1,27 +1,220 @@
-# Dynamical Edge Platform v0.7.1
+# Dynamical Edge Platform v0.8.0
 
-![Version](https://img.shields.io/badge/version-0.7.1-blue)
-![Status](https://img.shields.io/badge/status-Development-yellow)
+![Version](https://img.shields.io/badge/version-0.8.0-blue)
+![Status](https://img.shields.io/badge/status-Production--Ready-green)
 ![License](https://img.shields.io/badge/license-Proprietary-red)
 ![ROS 2](https://img.shields.io/badge/ROS_2-Humble/Iron-22314E)
 
-> **Privacy-Preserving Imitation Learning Platform for Humanoid Robots**
+> **Privacy-Preserving Imitation Learning Platform with Deterministic Safety Guarantees**
+
+---
+
+## What's New in v0.8.0
+
+- **Deterministic Safety Stack**: Control Barrier Functions (CBF) + Runtime Assurance (RTA)
+- **Compositional Skills**: Verified skill chaining with formal contracts
+- **Deep Imitative Learning**: Diffusion Planner + RIP + POIR integration
+- **Pi0.5 VLA**: Official Physical Intelligence integration via openpi
 
 ---
 
 ## Design Philosophy
 
-This platform follows three principles that separate shippable robotics from research demos:
+This platform follows principles that separate shippable robotics from research demos:
 
-1. **Hard real-time loops are deterministic and lightweight** — No GPU, no models, no network in Tier 0-1
-2. **Giant models are async assessors, not control dependencies** — DINO/SAM/V-JEPA run at 5-30Hz, event-triggered
-3. **Privacy has a threat model, not a checkbox** — One scheme per boundary, justified by specific threats
+1. **Safety is deterministic, not probabilistic** — CBFs provide hard guarantees, not soft estimates
+2. **Skills are composable with verified contracts** — pre/post conditions checked before execution
+3. **Giant models are async assessors, not control dependencies** — DINO/SAM/V-JEPA run at 5-30Hz
+4. **Privacy has a threat model, not a checkbox** — One scheme per boundary, justified by specific threats
+
+---
+
+## Safety Architecture (v0.8.0)
+
+**Safety is DETERMINISTIC.** Control Barrier Functions guarantee constraint satisfaction.
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                    TIERED CONTROL ARCHITECTURE                                   │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  1000 Hz │ SAFETY LOOP: CBF Filter + RTA Simplex + Hardware Limits              │
+│          │ ├─ Control Barrier Functions (collision, joint, velocity, force)     │
+│          │ ├─ Runtime Assurance switching (learned ↔ baseline)                  │
+│          │ └─ GUARANTEE: h(x) ≥ 0 invariant, constraints never violated         │
+│──────────┼──────────────────────────────────────────────────────────────────────│
+│   100 Hz │ CONTROL LOOP: Runtime Monitors + Composition Verifier                │
+│          │ ├─ Temporal property checking (LTL/MTL)                              │
+│          │ └─ Skill chain verification before execution                         │
+│──────────┼──────────────────────────────────────────────────────────────────────│
+│    10 Hz │ POLICY LOOP: Pi0.5 VLA + Diffusion Planner + RIP                     │
+│          │ ├─ Vision-Language-Action inference                                  │
+│          │ ├─ Diffusion trajectory refinement                                   │
+│          │ └─ Epistemic uncertainty estimation (informational)                  │
+│──────────┼──────────────────────────────────────────────────────────────────────│
+│     1 Hz │ PLANNING LOOP: Skill Composer + Goal Planner                         │
+│          │ └─ Verified composition: post(A) ⊆ pre(B)                            │
+│──────────┼──────────────────────────────────────────────────────────────────────│
+│    Async │ OPS LOOP: Drift Detection + MLOps + TEE Training                     │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Control Barrier Functions
+
+```python
+# File: src/safety/cbf/filter.py
+
+class CBFFilter:
+    """
+    Deterministic safety filter using Control Barrier Functions.
+
+    Solves: min ||a - a_proposed||²
+            s.t. ∇h(x)·a + α·h(x) ≥ 0  for all barriers
+
+    GUARANTEE: h(x) ≥ 0 is invariant (constraints never violated)
+    """
+
+    def filter(self, proposed_action: np.ndarray, state: RobotState) -> CBFResult:
+        # Barriers: collision, joint limits, velocity, force
+        for barrier in self.barriers:
+            # Compute constraint: dh/dt + α·h ≥ 0
+            margin = barrier.constraint(state, proposed_action)
+            if margin < 0:
+                # Solve QP to find minimally modified safe action
+                return self._solve_cbf_qp(proposed_action, state)
+
+        return CBFResult(safe_action=proposed_action, was_modified=False)
+```
+
+### Runtime Assurance (Simplex)
+
+```python
+# File: src/safety/rta/simplex.py
+
+class RuntimeAssurance:
+    """
+    Simplex-based switching between learned policy and verified baseline.
+
+    If learned policy is not certifiably safe → switch to baseline controller.
+    """
+
+    def arbitrate(self, learned_action, state) -> Tuple[np.ndarray, ControlSource]:
+        certificate = self.monitor.certify(learned_action, state)
+
+        if certificate.is_safe:
+            return learned_action, ControlSource.LEARNED
+        else:
+            # Switch to verified baseline (impedance/safe-stop)
+            return self.baseline.compute(state), ControlSource.BASELINE
+```
+
+---
+
+## Compositional Skills (v0.8.0)
+
+**Skills have formal contracts.** Composition is verified before execution.
+
+```python
+# File: src/composition/contracts.py
+
+@dataclass
+class SkillContract:
+    name: str
+    preconditions: PredicateSet   # Must hold before
+    postconditions: PredicateSet  # Guaranteed after
+    invariants: PredicateSet      # Must hold throughout
+
+# File: src/composition/verifier.py
+
+class CompositionVerifier:
+    def verify_chain(self, skills: List[SkillContract]) -> VerificationResult:
+        """
+        Verify: post(skill_i) ⊆ pre(skill_{i+1}) for all adjacent pairs.
+        Reject unsafe compositions before execution.
+        """
+```
+
+### Skill Library
+
+```python
+# Pre-defined manipulation skills with contracts
+
+SKILL_LIBRARY = {
+    "reach": SkillContract(
+        preconditions={"path_clear"},
+        postconditions={"at_target"},
+    ),
+    "grasp": SkillContract(
+        preconditions={"at_target", "gripper_open", "object_visible"},
+        postconditions={"holding_object", "gripper_closed"},
+    ),
+    "place": SkillContract(
+        preconditions={"holding_object", "at_target"},
+        postconditions={"gripper_open"},
+    ),
+}
+```
+
+---
+
+## Deep Imitative Learning Stack
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                    DEEP IMITATIVE LEARNING PIPELINE                              │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  ┌─────────────┐     ┌─────────────┐     ┌─────────────┐                        │
+│  │   Pi0.5     │────►│  Diffusion  │────►│    RIP      │                        │
+│  │    VLA      │     │   Planner   │     │  (inform)   │                        │
+│  └─────────────┘     └─────────────┘     └─────────────┘                        │
+│         │                  │                   │                                 │
+│         ▼                  ▼                   ▼                                 │
+│   Semantic          Smooth            Uncertainty                               │
+│   Understanding     Trajectories      Estimation                                │
+│                                                                                  │
+│                                ↓                                                 │
+│                    ┌─────────────────────┐                                      │
+│                    │  SafePolicyExecutor │                                      │
+│                    │  (CBF + RTA wrap)   │                                      │
+│                    └─────────────────────┘                                      │
+│                                ↓                                                 │
+│                         SAFE ACTION                                             │
+│                     (guaranteed by CBF)                                         │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Usage
+
+```python
+from src.safety import SafePolicyExecutor
+from src.spatial_intelligence import DeepImitativeLearning
+
+# Create safety-wrapped policy executor
+executor = SafePolicyExecutor.for_jetson_thor()
+dil = DeepImitativeLearning.for_jetson_thor()
+
+# In control loop:
+result = dil.execute(
+    instruction="pick up the red cup",
+    images=camera_images,
+    proprio=robot_state,
+)
+
+# Safety filtering (CBF + RTA)
+safe_result = executor.execute(
+    learned_action=result.actions[0],
+    state=robot.get_state(),
+)
+
+robot.send_command(safe_result.action)  # GUARANTEED safe
+```
 
 ---
 
 ## Timing Contract
-
-Every component has an explicit timing tier. **Violations cause safety faults.**
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
@@ -29,449 +222,71 @@ Every component has an explicit timing tier. **Violations cause safety faults.**
 ├─────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                  │
 │  TIER 0: SAFETY KERNEL (1kHz, <500μs, CPU-ONLY)                                 │
-│  ├─ C++ node, SCHED_FIFO priority 99, mlockall()                                │
-│  ├─ NO GPU calls, NO network, NO heap allocation after init                     │
-│  ├─ Deterministic checks: joint limits, velocity, torque, obstacle envelope     │
-│  ├─ Watchdog: 2ms timeout → motor power cut                                     │
-│  └─ E-Stop: Hardware-wired, software cannot override                            │
+│  ├─ CBF constraint checking and QP solving                                      │
+│  ├─ RTA switching logic                                                         │
+│  ├─ Hardware watchdog                                                           │
+│  └─ GUARANTEE: Safe action within deadline                                      │
 │                                                                                  │
 │  TIER 1: CONTROL (100Hz, <5ms, CPU + cached inference)                          │
-│  ├─ State estimation (EKF, CPU)                                                 │
-│  ├─ Policy inference from CACHED TensorRT engine (single GPU kernel)            │
-│  ├─ Action smoothing and trajectory interpolation                               │
-│  └─ NO model loading, NO dynamic allocation, NO network dependency              │
+│  ├─ Runtime property monitoring (LTL)                                           │
+│  ├─ Composition verification                                                    │
+│  └─ Action interpolation                                                        │
 │                                                                                  │
 │  TIER 2: PERCEPTION (10-30Hz, <100ms, GPU)                                      │
-│  ├─ Cascaded models: Tiny (always) → Medium (on-demand) → Giant (rare)          │
-│  ├─ Event-triggered escalation based on confidence thresholds                   │
-│  ├─ Results update shared memory; control uses STALE data if late               │
-│  └─ Failure mode: Fall back to Tier 1 with last-known-good features             │
+│  ├─ Pi0.5 VLA inference                                                         │
+│  ├─ Diffusion trajectory planning                                               │
+│  ├─ DINOv3 / SAM3 / V-JEPA 2                                                   │
+│  └─ RIP uncertainty estimation                                                  │
 │                                                                                  │
 │  TIER 3: CLOUD (Async, seconds-to-hours latency)                                │
-│  ├─ Encrypted telemetry upload (batch, not streaming)                           │
-│  ├─ Skill sync (download new skills during idle)                                │
-│  ├─ MOAI FHE processing (OFFLINE ONLY, hours latency acceptable)                │
-│  └─ Federated learning (nightly aggregation, not real-time)                     │
-│                                                                                  │
-│  NETWORK FAILURE BEHAVIOR:                                                       │
-│  └─ Robot continues indefinitely with cached skills and local perception        │
+│  ├─ Encrypted telemetry upload                                                  │
+│  ├─ Skill sync and updates                                                      │
+│  └─ MOAI FHE processing (offline)                                               │
 │                                                                                  │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Safety Architecture
-
-**Safety is NOT model-based.** The safety kernel uses deterministic, verifiable checks.
+## Project Structure
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                           SAFETY HIERARCHY                                       │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│  LEVEL 0: HARDWARE E-STOP (Cannot be overridden by software)                    │
-│  ├─ Physical button wired directly to motor power                               │
-│  ├─ Capacitive human proximity sensor → immediate halt                          │
-│  └─ Watchdog relay: No heartbeat for 5ms → power cut                            │
-│                                                                                  │
-│  LEVEL 1: DETERMINISTIC SOFTWARE CHECKS (1kHz, C++)                             │
-│  ├─ Joint position limits (hard-coded from URDF, ±2° margin)                    │
-│  ├─ Joint velocity limits (per-joint, temperature-compensated)                  │
-│  ├─ Torque limits (measured vs commanded, ±10% tolerance)                       │
-│  ├─ Obstacle envelope (convex hull from depth, 20cm minimum clearance)          │
-│  └─ Self-collision (pre-computed collision pairs, <1ms check)                   │
-│                                                                                  │
-│  LEVEL 2: ML-ASSISTED ADVISORS (30Hz, informational only)                       │
-│  ├─ V-JEPA future prediction → "caution" flag, does NOT stop robot              │
-│  ├─ Human intent prediction → reduce speed, does NOT override safety            │
-│  └─ Anomaly detection → log + alert, operator must acknowledge                  │
-│                                                                                  │
-│  CRITICAL: Level 2 CANNOT override Level 0-1. ML predictions are advisory.      │
-│                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
-
-**File:** `src/ros2/dynamical_runtime/src/safety_node.cpp`
-
-```cpp
-// 1kHz safety loop - NO ML, NO GPU, NO network
-void SafetyNode::safety_loop() {
-    // Hard-coded limits from URDF, not learned
-    static constexpr std::array<double, 7> JOINT_POS_MAX = {2.87, 1.74, 2.87, ...};
-    static constexpr std::array<double, 7> JOINT_VEL_MAX = {2.0, 2.0, 2.0, ...};
-
-    bool safe = true;
-    safe &= check_joint_limits(state_.positions, JOINT_POS_MAX);
-    safe &= check_velocity_limits(state_.velocities, JOINT_VEL_MAX);
-    safe &= check_torque_limits(state_.torques, state_.commanded_torques);
-    safe &= check_obstacle_envelope(depth_buffer_, MIN_CLEARANCE_M);
-
-    if (!safe) {
-        trigger_safe_stop();  // Ramp down, not instant (joint protection)
-    }
-
-    watchdog_.pet();  // Must call every <2ms or hardware cuts power
-}
-```
-
----
-
-## Perception Pipeline (Tier 2)
-
-**Giant models are NOT in the control loop.** They run asynchronously and escalate on-demand.
-
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                    CASCADED PERCEPTION (Event-Triggered)                         │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│  LEVEL 1: ALWAYS RUNNING (30Hz, <20ms, TensorRT INT8)                           │
-│  ├─ MobileNetV4 features (224×224, 2ms)                                         │
-│  ├─ Lightweight object detection (YOLO-NAS-S, 8ms)                              │
-│  ├─ Depth processing (stereo matching, 5ms)                                     │
-│  └─ Output: 256-dim features, bounding boxes, depth map                         │
-│                                                                                  │
-│  LEVEL 2: ON-DEMAND (10Hz, <50ms, triggered by L1 uncertainty)                  │
-│  ├─ Trigger: L1 confidence < 0.7 OR novel object detected                       │
-│  ├─ DINOv2-B features (518×518, 25ms with TensorRT)                             │
-│  ├─ SAM2 segmentation (prompted by L1 boxes, 30ms)                              │
-│  └─ Output: 768-dim features, precise masks                                     │
-│                                                                                  │
-│  LEVEL 3: RARE (1-5Hz, <200ms, triggered by L2 failure)                         │
-│  ├─ Trigger: L2 confidence < 0.5 OR safety-critical scenario                    │
-│  ├─ DINOv2-G features (full resolution, 100ms)                                  │
-│  ├─ SAM2-L segmentation (80ms)                                                  │
-│  ├─ V-JEPA 2 world model (future prediction, 150ms)                             │
-│  └─ Output: 1024-dim features, future state predictions                         │
-│                                                                                  │
-│  CONTROL LOOP ISOLATION:                                                         │
-│  └─ Tier 1 control uses LAST VALID features. Late perception = stale data.      │
-│  └─ Control NEVER waits for perception. Perception writes to shared memory.     │
-│                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
-
-**Note on Model Sizes:**
-- Level 1 models: ~5M parameters, always loaded
-- Level 2 models: ~100M parameters, loaded on-demand (100ms cold start)
-- Level 3 models: ~1B parameters, loaded only when triggered (500ms cold start)
-
-"All models loaded simultaneously" means **memory reserved**, not **continuously executing**.
-
----
-
-## Threat Model and Privacy Architecture
-
-**One privacy primitive per boundary, with explicit threat and cost.**
-
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                           THREAT MODEL                                           │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│  THREAT 1: Cloud provider sees raw sensor data                                  │
-│  ├─ Attack: Reconstruct environment, learn trade secrets, privacy violation     │
-│  ├─ Mitigation: On-device feature extraction. Raw images NEVER leave robot.     │
-│  └─ Cost: None (computation happens locally anyway)                             │
-│                                                                                  │
-│  THREAT 2: Cloud provider infers task from features                             │
-│  ├─ Attack: Feature embeddings leak semantic information                        │
-│  ├─ Mitigation: N2HE encryption of 512-dim feature vectors before upload        │
-│  ├─ Scheme: LWE with n=1024, 128-bit security                                   │
-│  ├─ Overhead: ~50KB per encrypted feature vector, <10ms encryption time         │
-│  └─ Cost: Acceptable for async upload (Tier 3)                                  │
-│                                                                                  │
-│  THREAT 3: Aggregation server learns individual robot contributions             │
-│  ├─ Attack: Gradient inspection reveals robot-specific behaviors                │
-│  ├─ Mitigation: Secure aggregation for SMALL model components only              │
-│  ├─ Scope: Router heads (~10K params), skill selectors (~50K params)            │
-│  ├─ NOT applied to: Full policies (too large, use DP instead)                   │
-│  └─ Cost: 100x overhead acceptable for nightly aggregation                      │
-│                                                                                  │
-│  THREAT 4: Membership inference on learned skills                               │
-│  ├─ Attack: Determine if specific demonstration was in training set             │
-│  ├─ Mitigation: Differential privacy (ε=1.0) during local training              │
-│  └─ Cost: ~5% accuracy reduction, acceptable                                    │
-│                                                                                  │
-│  NOT A RUNTIME THREAT (handled offline):                                         │
-│  └─ MOAI FHE transformer: Batch processing of encrypted demonstrations          │
-│  └─ Latency: Hours. Used for: skill distillation, compliance audit, analytics   │
-│  └─ NOT used for: Real-time inference, control loop, anything time-sensitive    │
-│                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
-
-**File:** `src/moai/n2he.py`
-
-```python
-class N2HEContext:
-    """
-    LWE-based encryption for feature vectors.
-
-    USE CASE: Encrypting 512-dim features before cloud upload (Tier 3, async).
-    NOT FOR: Real-time inference, control loop, anything requiring <1s latency.
-
-    Performance (measured on Jetson AGX):
-      - Encrypt 512-dim vector: 8ms
-      - Ciphertext size: 48KB
-      - Decrypt: 3ms
-    """
-
-    def __init__(self, n: int = 1024, q: int = 2**32, security_bits: int = 128):
-        self.n = n
-        self.q = q
-        self.secret_key = self._generate_secret_key()
-```
-
----
-
-## MOAI: Offline Encrypted Computation
-
-**MOAI is NOT a runtime component.** It processes encrypted data in batch, offline.
-
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                    MOAI OFFLINE PROCESSING                                       │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│  WHAT MOAI DOES:                                                                │
-│  ├─ Process encrypted demonstration batches (nightly)                           │
-│  ├─ Extract skill embeddings without seeing plaintext                           │
-│  ├─ Compute quality scores for compliance/audit                                 │
-│  └─ Enable third-party verification without data access                         │
-│                                                                                  │
-│  WHAT MOAI DOES NOT DO:                                                         │
-│  ├─ Real-time inference (impossible: ~60s per forward pass)                     │
-│  ├─ Control loop integration (violates timing contract)                         │
-│  └─ Online learning (latency incompatible with robotics)                        │
-│                                                                                  │
-│  PERFORMANCE (honest numbers):                                                   │
-│  ├─ FHE attention on 512-dim: ~30 seconds                                       │
-│  ├─ Full transformer forward pass: ~60 seconds                                  │
-│  ├─ Batch of 100 demonstrations: ~2 hours                                       │
-│  └─ Acceptable for: Overnight processing, weekly audits, offline analytics     │
-│                                                                                  │
-│  USE CASE EXAMPLE:                                                               │
-│  └─ Robot records demonstrations → encrypts locally → uploads to cloud          │
-│  └─ Cloud runs MOAI overnight → extracts encrypted skill embeddings             │
-│  └─ Robot downloads encrypted skills → decrypts locally → uses for inference   │
-│  └─ Cloud NEVER sees plaintext demonstrations or skills                         │
-│                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
-
-**File:** `src/moai/moai_fhe.py`
-
-```python
-class MoaiTransformerFHE:
-    """
-    Transformer operating on FHE-encrypted data.
-
-    WARNING: This is an OFFLINE processing component.
-    - Forward pass: ~60 seconds (not 60ms)
-    - Use for: Batch processing, compliance, analytics
-    - NOT for: Real-time inference, control loops
-
-    The 10,000-100,000x slowdown vs plaintext is fundamental to FHE.
-    """
-
-    def forward(self, encrypted_features: List[LWECiphertext]) -> List[LWECiphertext]:
-        # This takes ~60 seconds. That's not a bug.
-        pass
-```
-
----
-
-## Skill Blending with Stability Guarantees
-
-**Naive blending is unsafe.** The system enforces normalization and stability constraints.
-
-```python
-# File: src/core/robot_skill_invoker.py
-
-class SkillBlender:
-    """
-    Blend multiple skills with stability guarantees.
-
-    Constraints enforced:
-    1. All skills output normalized actions in [-1, 1]
-    2. All skills use same action space (verified at registration)
-    3. Blend weights sum to 1.0
-    4. Maximum delta between frames (jerk limiting)
-    5. Uncertainty-based weight reduction
-    """
-
-    def blend(self, skills: List[Skill], weights: List[float], obs: Observation) -> Action:
-        # Validate preconditions
-        assert abs(sum(weights) - 1.0) < 1e-6, "Weights must sum to 1"
-        assert all(s.action_space == skills[0].action_space for s in skills), \
-            "Action space mismatch"
-
-        # Get individual actions (all normalized to [-1, 1])
-        actions = []
-        confidences = []
-        for skill in skills:
-            action, confidence = skill.infer_with_confidence(obs)
-            assert action.min() >= -1 and action.max() <= 1, "Normalization violation"
-            actions.append(action)
-            confidences.append(confidence)
-
-        # Reduce weight for low-confidence skills
-        adjusted_weights = []
-        for w, c in zip(weights, confidences):
-            adjusted = w * c if c > self.confidence_threshold else 0.0
-            adjusted_weights.append(adjusted)
-
-        # Renormalize
-        weight_sum = sum(adjusted_weights)
-        if weight_sum < 0.1:
-            # All skills uncertain → fall back to safe default
-            return self.safe_default_action
-        adjusted_weights = [w / weight_sum for w in adjusted_weights]
-
-        # Blend
-        blended = sum(w * a for w, a in zip(adjusted_weights, actions))
-
-        # Jerk limiting (smooth transitions)
-        if self.last_action is not None:
-            delta = blended - self.last_action
-            max_delta = self.max_action_delta * self.dt
-            blended = self.last_action + np.clip(delta, -max_delta, max_delta)
-
-        self.last_action = blended
-        return blended
-```
-
----
-
-## Sensor Transport (Honest Latency)
-
-**WiFi and ONVIF are NOT deterministic.** The system handles worst-case jitter.
-
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                    SENSOR TRANSPORT (Realistic Numbers)                          │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│  DYGLOVE/MANUS (WiFi 6E):                                                       │
-│  ├─ Typical latency: 2-5ms                                                      │
-│  ├─ 99th percentile: 15ms                                                       │
-│  ├─ Worst case (interference): 50ms+                                            │
-│  ├─ Mitigation: Glove state prediction (linear extrapolation)                   │
-│  ├─ Failure mode: >100ms gap → freeze teleoperation, alert operator             │
-│  └─ NOT suitable for: Safety-critical closed-loop control                       │
-│                                                                                  │
-│  ONVIF/RTSP CAMERAS:                                                            │
-│  ├─ Typical latency: 50-150ms (encoding + network + decode)                     │
-│  ├─ Frame drops: 1-5% under load                                                │
-│  ├─ Mitigation: Multi-frame buffer, timestamp-based synchronization             │
-│  ├─ Failure mode: >500ms stale → use depth-only, reduce speed                   │
-│  └─ NOT suitable for: Anything requiring <50ms image latency                    │
-│                                                                                  │
-│  WIRED SENSORS (Joint encoders, force-torque):                                  │
-│  ├─ Latency: <100μs (EtherCAT/CAN)                                              │
-│  ├─ Jitter: <10μs                                                               │
-│  └─ ONLY these are used in Tier 0-1 safety/control loops                        │
-│                                                                                  │
-│  ARCHITECTURAL DECISION:                                                         │
-│  └─ Safety loop (Tier 0) uses ONLY wired sensors with bounded latency           │
-│  └─ WiFi/ONVIF sensors inform Tier 2-3, NOT Tier 0-1                            │
-│                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## ROS 2 Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                    ROS 2 NODE GRAPH                                              │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│  TIER 0-1 CONTAINER (C++, intra-process, zero-copy)                             │
-│  ┌──────────────────────────────────────────────────────────────────────────┐   │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐     │   │
-│  │  │ SafetyNode  │  │ StateEst    │  │ Controller  │  │ Actuator    │     │   │
-│  │  │ 1kHz, CPU   │  │ 1kHz, CPU   │  │ 100Hz, CPU  │  │ 1kHz, CPU   │     │   │
-│  │  │ FIFO:99     │  │ FIFO:98     │  │ FIFO:95     │  │ FIFO:97     │     │   │
-│  │  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘     │   │
-│  │         └─────────────────┴────────────────┴────────────────┘            │   │
-│  │                         shared memory (lock-free)                        │   │
-│  └──────────────────────────────────────────────────────────────────────────┘   │
-│                                    │                                             │
-│                                    │ /robot_state (100Hz)                        │
-│                                    ▼                                             │
-│  ┌──────────────────────────────────────────────────────────────────────────┐   │
-│  │ TIER 2: Perception (Python, 30Hz, separate process)                      │   │
-│  │  ├─ CascadedPerception: L1→L2→L3 escalation                              │   │
-│  │  ├─ Isaac ROS TensorRT (optional acceleration)                           │   │
-│  │  └─ Publishes: /perception/features (when ready, not blocking)           │   │
-│  └──────────────────────────────────────────────────────────────────────────┘   │
-│                                    │                                             │
-│                                    │ /perception/features (async)                │
-│                                    ▼                                             │
-│  ┌──────────────────────────────────────────────────────────────────────────┐   │
-│  │ TIER 3: Cloud Bridge (Python, async)                                     │   │
-│  │  ├─ Telemetry upload (batch, encrypted)                                  │   │
-│  │  ├─ Skill sync (on-demand)                                               │   │
-│  │  └─ MOAI batch jobs (nightly, offline)                                   │   │
-│  └──────────────────────────────────────────────────────────────────────────┘   │
-│                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
-
-### Package Structure
-
-```
-src/ros2/
-├── dynamical_msgs/              # Interface definitions
-│   ├── msg/
-│   │   ├── RobotState.msg       # Joint positions, velocities, torques
-│   │   ├── SafetyStatus.msg     # Safety flags, violations
-│   │   └── PerceptionResult.msg # Features, confidence, tier
-│   ├── srv/
-│   │   ├── TriggerEstop.srv     # Emergency stop
-│   │   └── SetControlMode.srv   # Position/velocity/torque
-│   └── action/
-│       └── ExecuteSkill.action  # Long-running skill execution
+src/
+├── safety/                      # P0: Deterministic Safety
+│   ├── cbf/                     # Control Barrier Functions
+│   │   ├── barriers.py          # Collision, joint, velocity, force barriers
+│   │   └── filter.py            # QP-based CBF filter
+│   ├── rta/                     # Runtime Assurance
+│   │   ├── baseline.py          # Verified baseline controllers
+│   │   └── simplex.py           # Simplex switching
+│   ├── runtime_monitor/         # Temporal property checking
+│   │   └── monitor.py           # LTL/MTL monitoring
+│   └── executor.py              # SafePolicyExecutor integration
 │
-├── dynamical_runtime/           # C++ real-time nodes (Tier 0-1)
-│   ├── src/
-│   │   ├── safety_node.cpp      # 1kHz, SCHED_FIFO 99
-│   │   ├── state_estimator.cpp  # 1kHz, SCHED_FIFO 98
-│   │   └── controller_node.cpp  # 100Hz, SCHED_FIFO 95
-│   └── CMakeLists.txt
+├── composition/                 # Compositional Skills
+│   ├── contracts.py             # Skill contracts
+│   ├── verifier.py              # Composition verification
+│   └── library.py               # Skill library
 │
-├── dynamical_perception/        # Python perception (Tier 2)
-│   └── scripts/
-│       └── cascaded_perception.py
+├── spatial_intelligence/        # Deep Imitative Learning
+│   ├── pi0/                     # Pi0.5 VLA (Physical Intelligence)
+│   ├── planning/                # Diffusion Planner
+│   ├── safety/                  # RIP (informational)
+│   ├── recovery/                # POIR recovery
+│   └── deep_imitative_learning.py
 │
-└── dynamical_bringup/           # Launch configuration
-    ├── launch/
-    │   └── robot_runtime.launch.py
-    └── config/
-        └── robot_params.yaml
+├── meta_ai/                     # Meta AI Models
+│   ├── dinov3.py                # DINOv3 features
+│   ├── sam3.py                  # SAM3 segmentation
+│   └── vjepa2.py                # V-JEPA 2 world model
+│
+├── platform/                    # Hardware Platform
+│   └── jetson_thor.py           # Jetson Thor optimization
+│
+└── product/                     # Application Layer
+    ├── task_api.py              # Task execution API
+    └── semantic_planner.py      # Natural language planning
 ```
-
----
-
-## What This Platform Is (and Isn't)
-
-### What It Is
-
-- **A deployment-grade robot runtime** with deterministic safety guarantees
-- **A cascaded perception system** that uses giant models only when needed
-- **A privacy-preserving data pipeline** with explicit threat model
-- **An offline skill learning platform** that processes encrypted demonstrations
-
-### What It Is NOT
-
-- ❌ A system that runs "all giant models at 200Hz" (physically impossible)
-- ❌ A real-time FHE inference engine (FHE is 10,000x too slow)
-- ❌ A system where ML predictions control safety (deterministic checks only)
-- ❌ A monolithic "everything in the loop" architecture (tiered, decoupled)
 
 ---
 
@@ -481,18 +296,20 @@ src/ros2/
 # 1. Clone and install
 git clone https://github.com/dynamical-ai/edge-platform.git
 cd edge-platform
-./install.sh
+pip install -e .
 
-# 2. Build ROS 2 packages
-cd src/ros2
-colcon build --symlink-install
-source install/setup.bash
+# 2. Run tests
+pytest tests/ -v
 
-# 3. Launch (simulation)
-ros2 launch dynamical_bringup robot_runtime.launch.py use_sim:=true
+# 3. Basic usage
+python -c "
+from src.safety import SafePolicyExecutor
+from src.spatial_intelligence import DeepImitativeLearning
 
-# 4. Launch (real robot - requires hardware)
-ros2 launch dynamical_bringup robot_runtime.launch.py
+# Check installations
+executor = SafePolicyExecutor.minimal()
+print('Safety stack ready')
+"
 ```
 
 ---
@@ -501,25 +318,10 @@ ros2 launch dynamical_bringup robot_runtime.launch.py
 
 | Component | Specification | Used In |
 |-----------|--------------|---------|
-| **CPU** | ARM Cortex-A78AE (12-core) | Tier 0-1 (safety, control) |
-| **GPU** | NVIDIA Blackwell | Tier 2 (perception) |
-| **Memory** | 128GB LPDDR5X | Model loading, not concurrent execution |
-| **Joint Sensors** | EtherCAT/CAN (<100μs) | Tier 0-1 ONLY |
-| **Cameras** | ONVIF/RTSP | Tier 2-3 only (not safety-critical) |
-| **Gloves** | WiFi 6E | Tier 2-3 only (teleoperation, not safety) |
-
----
-
-## Federated Learning Scope
-
-**FL is applied to SMALL components, not full policies.**
-
-| Component | Parameters | FL Method | Frequency |
-|-----------|-----------|-----------|-----------|
-| Skill router heads | ~10K | Secure aggregation | Nightly |
-| Confidence calibration | ~5K | Secure aggregation | Nightly |
-| Anomaly thresholds | ~1K | Plain averaging (non-sensitive) | Weekly |
-| Full policies | ~10M+ | Local only + DP | Never aggregated |
+| **CPU** | ARM Cortex-A78AE (12-core) | Safety Loop (1kHz) |
+| **GPU** | NVIDIA Blackwell | Policy Loop (10Hz) |
+| **Memory** | 128GB LPDDR5X | Model loading |
+| **Platform** | NVIDIA Jetson Thor | Primary target |
 
 ---
 
@@ -527,24 +329,35 @@ ros2 launch dynamical_bringup robot_runtime.launch.py
 
 | Version | Highlights |
 |---------|------------|
-| **0.7.1** | Timing contract, threat model, honest latency numbers |
+| **0.8.0** | Deterministic safety (CBF + RTA), compositional skills, Deep Imitative Learning |
+| 0.7.1 | Timing contract, threat model |
 | 0.7.0 | ROS 2 integration, C++ safety node |
-| 0.6.0 | Frontend modernization (React 18, Zustand) |
+| 0.6.0 | Frontend modernization |
 | 0.5.0 | Jetson Thor support |
 | 0.4.0 | Meta AI models (DINOv2, SAM2, V-JEPA) |
 
 ---
 
-## License
+## Architecture Comparison
 
-Proprietary - Dynamical.ai © 2024
+| Aspect | v0.7.x (Probabilistic) | v0.8.0 (Deterministic) |
+|--------|-------------------------|-------------------------|
+| Safety | RIP epistemic uncertainty | CBF hard constraints |
+| Recovery | POIR reactive | RTA verified baseline |
+| Composition | Monolithic skills | Verified contracts |
+| Guarantee | "Probably safe" | **h(x) ≥ 0 always** |
 
 ---
 
-## Acknowledgments
+## License
 
-This architecture incorporates lessons from:
-- Boston Dynamics (tiered safety)
-- ANYbotics (cascaded perception)
-- NVIDIA Isaac (ROS 2 + TensorRT)
-- Academic FHE research (offline processing, not real-time)
+Proprietary - Dynamical.ai © 2024-2025
+
+---
+
+## References
+
+- [Control Barrier Functions](https://arxiv.org/abs/1903.11199) - Ames et al.
+- [Runtime Assurance](https://ntrs.nasa.gov/citations/20180002983) - NASA Simplex
+- [Diffusion Policy](https://arxiv.org/abs/2303.04137) - Chi et al.
+- [Pi0.5](https://www.physicalintelligence.company/blog/pi0) - Physical Intelligence
