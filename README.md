@@ -1,389 +1,111 @@
-# Dynamical Edge Platform v0.8.0
+# Dynamical Edge Platform v0.9.0
 
-![Version](https://img.shields.io/badge/version-0.8.0-blue)
-![Status](https://img.shields.io/badge/status-Production--Ready-green)
+![Version](https://img.shields.io/badge/version-0.9.0-blue)
+![Status](https://img.shields.io/badge/status-Production-green)
 ![License](https://img.shields.io/badge/license-Proprietary-red)
 ![ROS 2](https://img.shields.io/badge/ROS_2-Humble/Iron-22314E)
 
 > **Privacy-Preserving Imitation Learning Platform with Deterministic Safety Guarantees**
 
----
-
-## What's New in v0.8.0
-
-- **Deterministic Safety Stack**: Control Barrier Functions (CBF) + Runtime Assurance (RTA)
-- **Compositional Skills**: Verified skill chaining with formal contracts
-- **Deep Imitative Learning**: Diffusion Planner + RIP + POIR integration
-- **Pi0.5 VLA**: Official Physical Intelligence integration via openpi
-- **No Skill Blending**: VLA handles multi-objective implicitly (blending deprecated)
-- **Compositional Training**: Automatic skill discovery from ONVIF/MANUS streams using Meta AI
+A production-grade robotics platform that enables humanoid robots to learn manipulation skills from human demonstrations while maintaining deterministic safety guarantees and data privacy.
 
 ---
 
-## Key Architectural Decision: No Skill Blending
-
-**v0.8.0 eliminates skill blending entirely.** The VLA learns multi-objective behavior implicitly.
-
-```
-OLD (v0.7.x - Skill Blending):                 NEW (v0.8.0 - Deep IL):
-──────────────────────────────                 ────────────────────────
-skill_grasp.infer() → action_1                 vla.infer(instruction) → action
-skill_avoid.infer() → action_2                 diffusion.refine(action) → trajectory
-blender.blend([a1,a2], weights) → blended      cbf.filter(trajectory) → safe_action
-safety.filter(blended) → safe_action
-
-Problems with blending:                        Why Deep IL is better:
-- Jitter and oscillations                      - VLA learns multi-objective from demos
-- Boundary instability                         - No runtime weight tuning needed
-- Fragile weight tuning                        - Smooth trajectories from diffusion
-- Safety guarantees break down                 - Hard safety from CBF
-```
-
-For long-horizon tasks, use **sequential decomposition** (not blending):
-```python
-from src.execution import DynamicalExecutor
-
-executor = DynamicalExecutor.for_jetson_thor()
-
-# Simple task - direct execution
-result = executor.execute("pick up the red cup", images, state)
-
-# Complex task - auto-decomposed into sequential sub-tasks
-result = executor.execute("set the table for dinner", images, state)
-# Internally: ["get plates", "place plates", "get utensils", ...]
-```
-
----
-
-## Design Philosophy
-
-This platform follows principles that separate shippable robotics from research demos:
-
-1. **Safety is deterministic, not probabilistic** — CBFs provide hard guarantees, not soft estimates
-2. **Skills are composable with verified contracts** — pre/post conditions checked before execution
-3. **Giant models are async assessors, not control dependencies** — DINO/SAM/V-JEPA run at 5-30Hz
-4. **Privacy has a threat model, not a checkbox** — One scheme per boundary, justified by specific threats
-
----
-
-## Safety Architecture (v0.8.0)
-
-**Safety is DETERMINISTIC.** Control Barrier Functions guarantee constraint satisfaction.
+## System Overview
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
-│                    TIERED CONTROL ARCHITECTURE                                   │
+│                         DYNAMICAL EDGE PLATFORM v0.9.0                           │
 ├─────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                  │
-│  1000 Hz │ SAFETY LOOP: CBF Filter + RTA Simplex + Hardware Limits              │
-│          │ ├─ Control Barrier Functions (collision, joint, velocity, force)     │
-│          │ ├─ Runtime Assurance switching (learned ↔ baseline)                  │
-│          │ └─ GUARANTEE: h(x) ≥ 0 invariant, constraints never violated         │
-│──────────┼──────────────────────────────────────────────────────────────────────│
-│   100 Hz │ CONTROL LOOP: Runtime Monitors + Composition Verifier                │
-│          │ ├─ Temporal property checking (LTL/MTL)                              │
-│          │ └─ Skill chain verification before execution                         │
-│──────────┼──────────────────────────────────────────────────────────────────────│
-│    10 Hz │ POLICY LOOP: Pi0.5 VLA + Diffusion Planner + RIP                     │
-│          │ ├─ Vision-Language-Action inference                                  │
-│          │ ├─ Diffusion trajectory refinement                                   │
-│          │ └─ Epistemic uncertainty estimation (informational)                  │
-│──────────┼──────────────────────────────────────────────────────────────────────│
-│     1 Hz │ PLANNING LOOP: Skill Composer + Goal Planner                         │
-│          │ └─ Verified composition: post(A) ⊆ pre(B)                            │
-│──────────┼──────────────────────────────────────────────────────────────────────│
-│    Async │ OPS LOOP: Drift Detection + MLOps + TEE Training                     │
+│  HUMAN DEMONSTRATION                           ROBOT EXECUTION                   │
+│  ┌────────────────────┐                       ┌────────────────────┐            │
+│  │  ONVIF Cameras     │                       │  Jetson Thor       │            │
+│  │  MANUS/DYGlove     │ ─────────────────────>│  (Edge Compute)    │            │
+│  │  3D Pose Capture   │    Imitation          │                    │            │
+│  └────────────────────┘    Learning           └─────────┬──────────┘            │
+│                                                         │                        │
+│                              ┌──────────────────────────┼──────────────────────┐│
+│                              │         SAFETY STACK (Deterministic)            ││
+│                              │  ┌─────────────┐  ┌─────────────┐  ┌──────────┐ ││
+│                              │  │ CBF Filter  │  │ RTA Simplex │  │ E-Stop   │ ││
+│                              │  │ (1kHz)      │  │ (100Hz)     │  │ (HW)     │ ││
+│                              │  └─────────────┘  └─────────────┘  └──────────┘ ││
+│                              └──────────────────────────┼──────────────────────┘│
+│                                                         │                        │
+│                                                         ▼                        │
+│                                               ┌────────────────────┐            │
+│                                               │   ROBOT CONTROL    │            │
+│                                               │   (200Hz)          │            │
+│                                               └────────────────────┘            │
 │                                                                                  │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Control Barrier Functions
+---
 
-```python
-# File: src/safety/cbf/filter.py
+## Key v0.9.0 Changes
 
-class CBFFilter:
-    """
-    Deterministic safety filter using Control Barrier Functions.
-
-    Solves: min ||a - a_proposed||²
-            s.t. ∇h(x)·a + α·h(x) ≥ 0  for all barriers
-
-    GUARANTEE: h(x) ≥ 0 is invariant (constraints never violated)
-    """
-
-    def filter(self, proposed_action: np.ndarray, state: RobotState) -> CBFResult:
-        # Barriers: collision, joint limits, velocity, force
-        for barrier in self.barriers:
-            # Compute constraint: dh/dt + α·h ≥ 0
-            margin = barrier.constraint(state, proposed_action)
-            if margin < 0:
-                # Solve QP to find minimally modified safe action
-                return self._solve_cbf_qp(proposed_action, state)
-
-        return CBFResult(safe_action=proposed_action, was_modified=False)
-```
-
-### Runtime Assurance (Simplex)
-
-```python
-# File: src/safety/rta/simplex.py
-
-class RuntimeAssurance:
-    """
-    Simplex-based switching between learned policy and verified baseline.
-
-    If learned policy is not certifiably safe → switch to baseline controller.
-    """
-
-    def arbitrate(self, learned_action, state) -> Tuple[np.ndarray, ControlSource]:
-        certificate = self.monitor.certify(learned_action, state)
-
-        if certificate.is_safe:
-            return learned_action, ControlSource.LEARNED
-        else:
-            # Switch to verified baseline (impedance/safe-stop)
-            return self.baseline.compute(state), ControlSource.BASELINE
-```
+| Change | Description |
+|--------|-------------|
+| **SkillBlender Removed** | VLA models learn multi-objective behavior implicitly via Deep Imitative Learning. No runtime skill blending needed. |
+| **Unified Orchestrator** | Single entry point for skill routing, robot assignment, and location adaptation |
+| **CBF + RTA Safety** | Deterministic safety guarantees with Control Barrier Functions and Runtime Assurance |
+| **Pi0.5 VLA** | Official Physical Intelligence integration via openpi |
+| **Meta AI v3** | DINOv3, SAM3, V-JEPA 2 perception stack |
+| **Cleaned Codebase** | Removed mock implementations, consolidated duplicate code |
 
 ---
 
-## Compositional Skills (v0.8.0)
+## Architecture
 
-**Skills have formal contracts.** Composition is verified before execution.
+### 5-Tier Control Architecture
 
-```python
-# File: src/composition/contracts.py
-
-@dataclass
-class SkillContract:
-    name: str
-    preconditions: PredicateSet   # Must hold before
-    postconditions: PredicateSet  # Guaranteed after
-    invariants: PredicateSet      # Must hold throughout
-
-# File: src/composition/verifier.py
-
-class CompositionVerifier:
-    def verify_chain(self, skills: List[SkillContract]) -> VerificationResult:
-        """
-        Verify: post(skill_i) ⊆ pre(skill_{i+1}) for all adjacent pairs.
-        Reject unsafe compositions before execution.
-        """
-```
-
-### Skill Library
-
-```python
-# Pre-defined manipulation skills with contracts
-
-SKILL_LIBRARY = {
-    "reach": SkillContract(
-        preconditions={"path_clear"},
-        postconditions={"at_target"},
-    ),
-    "grasp": SkillContract(
-        preconditions={"at_target", "gripper_open", "object_visible"},
-        postconditions={"holding_object", "gripper_closed"},
-    ),
-    "place": SkillContract(
-        preconditions={"holding_object", "at_target"},
-        postconditions={"gripper_open"},
-    ),
-}
-```
-
-### Runtime Verification (v0.8.0)
-
-**Postconditions are verified in the REAL WORLD before transitions.**
-
-Static contract verification is necessary but not sufficient. Runtime verification uses perception (SAM3, DINOv3, V-JEPA2) to verify that postconditions actually hold, and CBF to ensure transitions are safe.
-
-```python
-from src.composition.runtime import PostconditionVerifier, TransitionSafety
-from src.composition.runtime.transition_safety import RuntimeTransitionChecker
-
-# Create runtime checker with perception
-checker = RuntimeTransitionChecker.create(unified_perception=perception_pipeline)
-
-# After skill completes, verify postconditions ACTUALLY hold
-allowed, details = checker.verify_transition(
-    skill_from="grasp",
-    skill_to="lift",
-    postconditions=["holding(object)"],  # Verified via gripper force + SAM3
-    preconditions=["holding(object)"],
-    frame=current_camera_frame,
-    robot_state=current_robot_state,
-)
-
-if allowed:
-    executor.execute("lift", images, state)
-else:
-    # Handle failure with suggested recovery
-    recovery_action = details.get("suggested_recovery")  # e.g., "retry_grasp"
-    handle_recovery(recovery_action)
-```
-
-**Verification Methods:**
-- **SAM3**: Object presence, location, stacking relationships
-- **DINOv3**: Semantic state similarity verification
-- **Robot State**: Gripper position, force, end-effector position
-- **CBF**: Velocity continuity, force limits during transitions
-
----
-
-## Deep Imitative Learning Stack
+The platform operates on a strict timing hierarchy where higher tiers cannot override lower tier safety decisions:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────────┐
-│                    DEEP IMITATIVE LEARNING PIPELINE                              │
+│                           TIMING ARCHITECTURE                                    │
 ├─────────────────────────────────────────────────────────────────────────────────┤
 │                                                                                  │
-│  ┌─────────────┐     ┌─────────────┐     ┌─────────────┐                        │
-│  │   Pi0.5     │────►│  Diffusion  │────►│    RIP      │                        │
-│  │    VLA      │     │   Planner   │     │  (inform)   │                        │
-│  └─────────────┘     └─────────────┘     └─────────────┘                        │
-│         │                  │                   │                                 │
-│         ▼                  ▼                   ▼                                 │
-│   Semantic          Smooth            Uncertainty                               │
-│   Understanding     Trajectories      Estimation                                │
-│                                                                                  │
-│                                ↓                                                 │
-│                    ┌─────────────────────┐                                      │
-│                    │  SafePolicyExecutor │                                      │
-│                    │  (CBF + RTA wrap)   │                                      │
-│                    └─────────────────────┘                                      │
-│                                ↓                                                 │
-│                         SAFE ACTION                                             │
-│                     (guaranteed by CBF)                                         │
+│  TIER 0 │ 1000 Hz │ SAFETY KERNEL (CPU-only, <500μs)                            │
+│         │         │ ├─ Control Barrier Functions (CBF)                          │
+│         │         │ ├─ Runtime Assurance (RTA Simplex)                          │
+│         │         │ └─ GUARANTEE: h(x) ≥ 0 always (constraints never violated)  │
+│─────────┼─────────┼─────────────────────────────────────────────────────────────│
+│  TIER 1 │  200 Hz │ CONTROL LOOP (Edge, <5ms)                                   │
+│         │         │ ├─ RobotSkillInvoker: Action execution                       │
+│         │         │ ├─ Composition Verifier: Skill chain validation             │
+│         │         │ └─ Runtime Monitor: Temporal property checking              │
+│─────────┼─────────┼─────────────────────────────────────────────────────────────│
+│  TIER 2 │  10 Hz  │ POLICY LOOP (GPU, <100ms)                                   │
+│         │         │ ├─ Pi0.5 VLA: Vision-Language-Action inference              │
+│         │         │ ├─ Diffusion Planner: Trajectory refinement                 │
+│         │         │ └─ DINOv3/SAM3/V-JEPA2: Perception                          │
+│─────────┼─────────┼─────────────────────────────────────────────────────────────│
+│  TIER 3 │   1 Hz  │ PLANNING LOOP (Cloud/Edge, <1s)                             │
+│         │         │ ├─ UnifiedSkillOrchestrator: Task decomposition             │
+│         │         │ ├─ MoE Router: Skill selection                              │
+│         │         │ └─ Spatial Router: Robot assignment                         │
+│─────────┼─────────┼─────────────────────────────────────────────────────────────│
+│  TIER 4 │  Async  │ CLOUD SYNC (seconds to hours)                               │
+│         │         │ ├─ Federated Learning: Privacy-preserving training          │
+│         │         │ ├─ Skill Sync: MoE skill updates                            │
+│         │         │ └─ MOAI FHE: Encrypted inference (offline only)             │
 │                                                                                  │
 └─────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Usage
+### Core Components
 
-```python
-from src.safety import SafePolicyExecutor
-from src.spatial_intelligence import DeepImitativeLearning
-
-# Create safety-wrapped policy executor
-executor = SafePolicyExecutor.for_jetson_thor()
-dil = DeepImitativeLearning.for_jetson_thor()
-
-# In control loop:
-result = dil.execute(
-    instruction="pick up the red cup",
-    images=camera_images,
-    proprio=robot_state,
-)
-
-# Safety filtering (CBF + RTA)
-safe_result = executor.execute(
-    learned_action=result.actions[0],
-    state=robot.get_state(),
-)
-
-robot.send_command(safe_result.action)  # GUARANTEED safe
-```
-
----
-
-## Compositional Training (v0.8.0)
-
-**Solves training compositionality** using existing infrastructure:
-
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                    COMPOSITIONAL TRAINING PIPELINE                               │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│  CONTINUOUS DATA CAPTURE (Already Have)                                          │
-│  ┌──────────────┐   ┌──────────────┐   ┌──────────────┐                         │
-│  │ ONVIF Cameras│   │ MANUS Gloves │   │Robot Proprio │                         │
-│  └──────┬───────┘   └──────┬───────┘   └──────┬───────┘                         │
-│         └──────────────────┼──────────────────┘                                  │
-│                            ▼                                                     │
-│  META AI SEGMENTATION (Already Have)                                             │
-│  ┌──────────────┐   ┌──────────────┐   ┌──────────────┐                         │
-│  │     SAM3     │   │    DINOv3    │   │   V-JEPA2    │                         │
-│  │   Objects    │   │   Features   │   │   Temporal   │                         │
-│  └──────┬───────┘   └──────┬───────┘   └──────┬───────┘                         │
-│         └──────────────────┼──────────────────┘                                  │
-│                            ▼                                                     │
-│  SKILL DISCOVERY (New)                                                           │
-│  ├─ Segment demos at object-interaction boundaries (SAM3)                        │
-│  ├─ Cluster segments by DINOv3 features → primitives                             │
-│  └─ Learn temporal structure with V-JEPA2 → hierarchy                            │
-│                            ▼                                                     │
-│  COMPOSITIONAL TRAINING (New)                                                    │
-│  ├─ Train primitive policies on discovered segments                              │
-│  ├─ Learn composition operators (sequence, conditional)                          │
-│  └─ Enable novel task composition NOT seen in training                           │
-│                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
-
-### Why This Matters
-
-| Approach | Training Data | Novel Tasks | Transfer |
-|----------|---------------|-------------|----------|
-| End-to-end VLA | O(n²) combinations | Fails | None |
-| **Compositional** | O(n) primitives | **Composes** | **Yes** |
-
-### Usage
-
-```python
-from src.training.compositional import CompositionalTrainer
-
-# Initialize with existing infrastructure
-trainer = CompositionalTrainer.for_jetson_thor()
-trainer.initialize()
-
-# Continuous learning from human trainers
-for demo in trainer.data_stream.stream_demos():
-    trainer.add_demo(demo)
-
-# Run full training pipeline
-result = trainer.train()
-
-# Compose novel task NOT seen in training!
-task = trainer.compose_novel_task("stack blocks by color while avoiding the cat")
-trainer.execute_composed_task(task, robot_state)
-```
-
----
-
-## Timing Contract
-
-```
-┌─────────────────────────────────────────────────────────────────────────────────┐
-│                           TIMING CONTRACT (HARD REQUIREMENTS)                    │
-├─────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                  │
-│  TIER 0: SAFETY KERNEL (1kHz, <500μs, CPU-ONLY)                                 │
-│  ├─ CBF constraint checking and QP solving                                      │
-│  ├─ RTA switching logic                                                         │
-│  ├─ Hardware watchdog                                                           │
-│  └─ GUARANTEE: Safe action within deadline                                      │
-│                                                                                  │
-│  TIER 1: CONTROL (100Hz, <5ms, CPU + cached inference)                          │
-│  ├─ Runtime property monitoring (LTL)                                           │
-│  ├─ Composition verification                                                    │
-│  └─ Action interpolation                                                        │
-│                                                                                  │
-│  TIER 2: PERCEPTION (10-30Hz, <100ms, GPU)                                      │
-│  ├─ Pi0.5 VLA inference                                                         │
-│  ├─ Diffusion trajectory planning                                               │
-│  ├─ DINOv3 / SAM3 / V-JEPA 2                                                   │
-│  └─ RIP uncertainty estimation                                                  │
-│                                                                                  │
-│  TIER 3: CLOUD (Async, seconds-to-hours latency)                                │
-│  ├─ Encrypted telemetry upload                                                  │
-│  ├─ Skill sync and updates                                                      │
-│  └─ MOAI FHE processing (offline)                                               │
-│                                                                                  │
-└─────────────────────────────────────────────────────────────────────────────────┘
-```
+| Component | Location | Purpose |
+|-----------|----------|---------|
+| **UnifiedSkillOrchestrator** | `src/core/unified_skill_orchestrator.py` | Task decomposition, MoE routing, robot assignment |
+| **RobotSkillInvoker** | `src/core/robot_skill_invoker.py` | 200Hz skill execution on edge |
+| **CBFFilter** | `src/safety/cbf/filter.py` | Deterministic safety via Control Barrier Functions |
+| **RTASimplex** | `src/safety/rta/simplex.py` | Learned ↔ Baseline controller switching |
+| **DeepImitativeLearning** | `src/spatial_intelligence/deep_imitative_learning.py` | Pi0.5 + Diffusion + RIP pipeline |
+| **IntegratedPipeline** | `src/pipeline/integrated_pipeline.py` | End-to-end data processing |
 
 ---
 
@@ -391,116 +113,229 @@ trainer.execute_composed_task(task, robot_state)
 
 ```
 src/
-├── execution/                   # Main Execution Layer (NO SKILL BLENDING)
-│   ├── dynamical_executor.py    # Simplified executor using Deep IL
-│   └── task_decomposer.py       # Long-horizon task decomposition
+├── core/                           # Core System Components
+│   ├── unified_skill_orchestrator.py   # Task → Skills → Robots (v0.9.0)
+│   ├── robot_skill_invoker.py          # 200Hz skill execution
+│   ├── gmr_retargeting.py              # Human → Robot motion transfer
+│   ├── error_handling.py               # Graceful degradation
+│   ├── timing_architecture.py          # 5-tier timing system
+│   └── config_loader.py                # Configuration management
 │
-├── training/                    # Compositional Training
-│   └── compositional/           # Skill Discovery + Hierarchy Learning
-│       ├── skill_discovery.py   # SAM3+DINOv3+V-JEPA2 segmentation
-│       ├── hierarchical_imitation.py  # Build skill hierarchies
-│       └── compositional_trainer.py   # End-to-end training pipeline
+├── safety/                         # Deterministic Safety Stack
+│   ├── cbf/                            # Control Barrier Functions
+│   │   ├── filter.py                   # QP-based CBF filter
+│   │   └── barriers.py                 # Collision, joint, velocity barriers
+│   ├── rta/                            # Runtime Assurance
+│   │   ├── simplex.py                  # Learned ↔ Baseline switching
+│   │   └── baseline.py                 # Verified safe controllers
+│   └── runtime_monitor/                # Temporal property checking
 │
-├── safety/                      # P0: Deterministic Safety
-│   ├── cbf/                     # Control Barrier Functions
-│   │   ├── barriers.py          # Collision, joint, velocity, force barriers
-│   │   └── filter.py            # QP-based CBF filter
-│   ├── rta/                     # Runtime Assurance
-│   │   ├── baseline.py          # Verified baseline controllers
-│   │   └── simplex.py           # Simplex switching
-│   ├── runtime_monitor/         # Temporal property checking
-│   │   └── monitor.py           # LTL/MTL monitoring
-│   └── executor.py              # SafePolicyExecutor integration
+├── spatial_intelligence/           # Deep Imitative Learning
+│   ├── pi0/                            # Physical Intelligence Pi0.5
+│   ├── planning/                       # Diffusion trajectory planning
+│   ├── safety/                         # RIP uncertainty estimation
+│   └── deep_imitative_learning.py      # Unified DIL pipeline
 │
-├── composition/                 # Sequential Task Chaining (NOT blending)
-│   ├── contracts.py             # Task contracts
-│   ├── verifier.py              # Composition verification
-│   └── library.py               # Task library
+├── meta_ai/                        # Meta AI Perception Models
+│   ├── dinov3.py                       # DINOv3 features
+│   ├── sam3.py                         # SAM3 segmentation
+│   └── vjepa2.py                       # V-JEPA 2 temporal understanding
 │
-├── spatial_intelligence/        # Deep Imitative Learning
-│   ├── pi0/                     # Pi0.5 VLA (Physical Intelligence)
-│   ├── planning/                # Diffusion Planner
-│   ├── safety/                  # RIP (informational)
-│   ├── recovery/                # POIR recovery
-│   └── deep_imitative_learning.py
+├── composition/                    # Skill Composition Framework
+│   ├── contracts.py                    # Pre/post condition contracts
+│   ├── verifier.py                     # Static composition verification
+│   └── runtime/                        # Runtime verification
 │
-├── meta_ai/                     # Meta AI Models (used by training)
-│   ├── dinov3.py                # DINOv3 features → skill clustering
-│   ├── sam3.py                  # SAM3 segmentation → object boundaries
-│   └── vjepa2.py                # V-JEPA 2 → temporal structure
+├── platform/                       # Platform Services
+│   ├── api/                            # FastAPI backend
+│   ├── edge/                           # Edge device SDKs (DYGlove, MANUS)
+│   ├── cloud/                          # Cloud services (MoE, Federated Learning)
+│   ├── calibration/                    # Hardware calibration
+│   └── ui/                             # React/Vite web interface
 │
-├── platform/                    # Hardware Platform
-│   ├── edge/
-│   │   ├── onvif_cameras.py     # Video capture for training
-│   │   └── manus_sdk.py         # Glove data for training
-│   └── jetson_thor.py           # Jetson Thor optimization
+├── robot_runtime/                  # Robot Execution Layer
+│   ├── agent.py                        # ROS2 robot agent
+│   ├── safety_shield.py                # Deterministic safety checks
+│   └── perception_pipeline.py          # Unified perception
 │
-├── core/                        # Core Utilities
-│   └── skill_blender.py         # DEPRECATED - use DynamicalExecutor
+├── simulation/                     # Isaac Lab Simulation
+│   ├── isaac_lab/                      # Isaac Lab environments
+│   └── bridge/                         # Sim-to-real bridge
 │
-└── product/                     # Application Layer
-    ├── task_api.py              # Task execution API
-    └── semantic_planner.py      # Natural language planning
+├── federated/                      # Federated Learning
+│   └── unified_pipeline.py             # Privacy-preserving training
+│
+└── moai/                           # MOAI Privacy Layer
+    ├── n2he.py                         # N2HE homomorphic encryption
+    └── fhe_wrapper.py                  # FHE model wrapper
 ```
 
 ---
 
 ## Quick Start
 
+### Installation
+
 ```bash
-# 1. Clone and install
+# Clone repository
 git clone https://github.com/dynamical-ai/edge-platform.git
 cd edge-platform
+
+# Install dependencies
 pip install -e .
 
-# 2. Run tests
-pytest tests/ -v
+# Verify installation
+python -c "from src.version import __version__; print(f'Dynamical v{__version__}')"
+```
 
-# 3. Basic usage
-python -c "
+### Basic Usage
+
+```python
+from src.core import get_orchestrator, get_skill_invoker
 from src.safety import SafePolicyExecutor
-from src.spatial_intelligence import DeepImitativeLearning
+import numpy as np
 
-# Check installations
-executor = SafePolicyExecutor.minimal()
-print('Safety stack ready')
-"
+# 1. Orchestrate a task (TIER 3: Planning)
+orchestrator = get_orchestrator()
+orchestrator.configure({
+    "workspaces": [{"id": "ws1", "name": "Assembly", ...}],
+    "robots": [{"id": "thor_001", "capabilities": ["manipulation"]}]
+})
+
+result = orchestrator.orchestrate(OrchestrationRequest(
+    task_description="Pick up the red cup and place it on the shelf",
+    assignment_strategy=AssignmentStrategy.NEAREST
+))
+
+# 2. Execute each step (TIER 1: Control @ 200Hz)
+invoker = get_skill_invoker()
+for step in result.plan.steps:
+    action_result = orchestrator.execute_step(step, observation)
+
+    # 3. Safety filter (TIER 0: Safety @ 1kHz)
+    safe_executor = SafePolicyExecutor.for_jetson_thor()
+    safe_action = safe_executor.execute(
+        learned_action=action_result["action"],
+        state=robot.get_state()
+    )
+
+    robot.send_command(safe_action)  # GUARANTEED safe
+```
+
+### API Endpoints
+
+```bash
+# Task orchestration (v0.9.0)
+POST /api/v1/skills/orchestrate
+{
+    "task_description": "Pick up the cup",
+    "robot_id": "thor_001",
+    "assignment_strategy": "nearest"
+}
+
+# Direct skill invocation
+POST /api/v1/skills/invoke
+{
+    "skill_ids": ["skill_grasp"],
+    "joint_positions": [0.0, 0.1, ...],
+    "joint_velocities": [0.0, 0.0, ...],
+    "mode": "direct"
+}
+
+# Safety check
+POST /api/v1/safety/check
+{
+    "joint_positions": [...],
+    "joint_velocities": [...]
+}
+```
+
+---
+
+## Safety Philosophy
+
+**Safety is DETERMINISTIC, not probabilistic.**
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                           SAFETY ARCHITECTURE                                    │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│   ML/AI Components                    │   Safety Components                      │
+│   (CAN be uncertain)                  │   (MUST be deterministic)               │
+│                                       │                                          │
+│   ┌─────────────────────┐            │   ┌─────────────────────┐               │
+│   │  Pi0.5 VLA          │            │   │  CBF Filter         │               │
+│   │  (action proposal)  │ ──────────────>│  (hard constraints) │               │
+│   └─────────────────────┘            │   └──────────┬──────────┘               │
+│                                       │              │                           │
+│   ┌─────────────────────┐            │   ┌──────────▼──────────┐               │
+│   │  DINOv3/SAM3        │            │   │  RTA Simplex        │               │
+│   │  (scene understand) │            │   │  (certified switch) │               │
+│   └─────────────────────┘            │   └──────────┬──────────┘               │
+│                                       │              │                           │
+│   ┌─────────────────────┐            │   ┌──────────▼──────────┐               │
+│   │  RIP Uncertainty    │            │   │  Hardware E-Stop    │               │
+│   │  (informational)    │            │   │  (physical switch)  │               │
+│   └─────────────────────┘            │   └─────────────────────┘               │
+│                                       │                                          │
+│   NOTE: ML predictions are           │   GUARANTEE: h(x) ≥ 0 always            │
+│   INFORMATIONAL ONLY                 │   Constraints NEVER violated             │
+│                                       │                                          │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Control Barrier Functions (CBF)
+
+```python
+# CBF guarantees: h(x) ≥ 0 is invariant
+# If proposed action would violate constraint, find minimal modification
+
+class CBFFilter:
+    def filter(self, proposed_action, state) -> CBFResult:
+        for barrier in [collision, joint_limits, velocity, force]:
+            if barrier.would_violate(proposed_action, state):
+                return self._solve_qp(proposed_action, state)  # Find safe action
+        return CBFResult(safe_action=proposed_action, was_modified=False)
 ```
 
 ---
 
 ## Hardware Requirements
 
-| Component | Specification | Used In |
-|-----------|--------------|---------|
-| **CPU** | ARM Cortex-A78AE (12-core) | Safety Loop (1kHz) |
-| **GPU** | NVIDIA Blackwell | Policy Loop (10Hz) |
+| Component | Specification | Used For |
+|-----------|--------------|----------|
+| **Platform** | NVIDIA Jetson Thor | Primary edge compute |
+| **CPU** | ARM Cortex-A78AE (12-core) | Safety loop (1kHz) |
+| **GPU** | NVIDIA Blackwell | VLA inference (10Hz) |
 | **Memory** | 128GB LPDDR5X | Model loading |
-| **Platform** | NVIDIA Jetson Thor | Primary target |
+| **Cameras** | ONVIF PTZ | Multi-angle capture |
+| **Gloves** | DYGlove / MANUS | Hand tracking |
+
+---
+
+## Network Failure Behavior
+
+The platform is designed for **indefinite operation without network connectivity**:
+
+1. **Safety**: Runs entirely on edge CPU (no cloud dependency)
+2. **Control**: Cached TensorRT models continue execution
+3. **Perception**: Local models (DINOv3-B, SAM3) provide basic perception
+4. **Skills**: Cached skills continue working; new skills sync when network returns
+5. **Telemetry**: Buffered locally, uploaded when connection restored
 
 ---
 
 ## Version History
 
-| Version | Highlights |
-|---------|------------|
-| **0.8.0** | Deterministic safety (CBF + RTA), compositional skills, Deep Imitative Learning |
-| 0.7.1 | Timing contract, threat model |
-| 0.7.0 | ROS 2 integration, C++ safety node |
-| 0.6.0 | Frontend modernization |
-| 0.5.0 | Jetson Thor support |
-| 0.4.0 | Meta AI models (DINOv2, SAM2, V-JEPA) |
-
----
-
-## Architecture Comparison
-
-| Aspect | v0.7.x (Probabilistic) | v0.8.0 (Deterministic) |
-|--------|-------------------------|-------------------------|
-| Safety | RIP epistemic uncertainty | CBF hard constraints |
-| Recovery | POIR reactive | RTA verified baseline |
-| Composition | Monolithic skills | Verified contracts |
-| Guarantee | "Probably safe" | **h(x) ≥ 0 always** |
+| Version | Date | Highlights |
+|---------|------|------------|
+| **0.9.0** | 2024-12 | Removed SkillBlender, unified orchestration, CBF+RTA safety |
+| 0.8.0 | 2024-11 | Deep Imitative Learning, compositional skills, Pi0.5 VLA |
+| 0.7.1 | 2024-10 | Timing contracts, threat model documentation |
+| 0.7.0 | 2024-09 | ROS 2 integration, C++ safety node |
+| 0.6.0 | 2024-08 | Frontend modernization (React/Vite) |
+| 0.5.0 | 2024-07 | Jetson Thor support |
 
 ---
 
@@ -513,6 +348,8 @@ Proprietary - Dynamical.ai © 2024-2025
 ## References
 
 - [Control Barrier Functions](https://arxiv.org/abs/1903.11199) - Ames et al.
-- [Runtime Assurance](https://ntrs.nasa.gov/citations/20180002983) - NASA Simplex
+- [Runtime Assurance (Simplex)](https://ntrs.nasa.gov/citations/20180002983) - NASA
 - [Diffusion Policy](https://arxiv.org/abs/2303.04137) - Chi et al.
-- [Pi0.5](https://www.physicalintelligence.company/blog/pi0) - Physical Intelligence
+- [Pi0](https://www.physicalintelligence.company/blog/pi0) - Physical Intelligence
+- [DINOv2](https://arxiv.org/abs/2304.07193) - Meta AI
+- [SAM2](https://arxiv.org/abs/2408.00714) - Meta AI

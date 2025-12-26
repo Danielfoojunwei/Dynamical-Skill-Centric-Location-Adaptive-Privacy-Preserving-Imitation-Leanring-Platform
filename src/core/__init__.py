@@ -1,18 +1,23 @@
 """
-Core Module - Central Engine for Dynamical Edge Platform
+Core Module - Central Engine for Dynamical Edge Platform v0.9.0
 
 This module contains the core functionality including:
-- Skill orchestration and execution
-- Motion retargeting (human-to-robot)
+- Skill orchestration and execution (UnifiedSkillOrchestrator)
+- Robot skill invocation (RobotSkillInvoker)
+- Motion retargeting (human-to-robot via GMR)
 - Error handling and system robustness
 - Timing architecture for real-time control
 - Configuration management
 
 Primary Components:
+    - UnifiedSkillOrchestrator: MoE-based skill routing and task decomposition
+    - RobotSkillInvoker: Edge skill execution at 200Hz
     - TimingOrchestrator: 4-tier timing system coordination
     - SystemErrorManager: Comprehensive error handling with fallbacks
     - RobustSystemManager: System-wide robustness management
-    - SkillBlender: Multi-skill blending with stability guarantees
+
+Note: SkillBlender was deprecated in v0.8.0 and removed in v0.9.0.
+      VLA handles multi-objective behavior implicitly via Deep Imitative Learning.
 
 Usage:
     from src.core import (
@@ -100,8 +105,25 @@ from .batch_autotuner import BatchSizeAutotuner, find_optimal_batch_size
 # Schema validation
 from .schema_validator import ValidationResult, SchemaValidator
 
-# Skill blending
-from .skill_blender import SkillBlender, BlendConfig, SkillOutput, BlendResult
+# Skill orchestration (v0.9.0)
+from .unified_skill_orchestrator import (
+    UnifiedSkillOrchestrator,
+    get_orchestrator,
+    configure_orchestrator,
+    OrchestrationRequest,
+    OrchestrationResult,
+    SkillExecutionPlan,
+    SkillStep,
+)
+
+from .robot_skill_invoker import (
+    RobotSkillInvoker,
+    get_skill_invoker,
+    SkillInvocationRequest,
+    SkillInvocationResult,
+    ObservationState,
+    RobotAction,
+)
 
 # Submodules
 from . import retargeting
@@ -183,11 +205,20 @@ __all__ = [
     'ValidationResult',
     'SchemaValidator',
 
-    # Skill blending
-    'SkillBlender',
-    'BlendConfig',
-    'SkillOutput',
-    'BlendResult',
+    # Skill orchestration (v0.9.0)
+    'UnifiedSkillOrchestrator',
+    'get_orchestrator',
+    'configure_orchestrator',
+    'OrchestrationRequest',
+    'OrchestrationResult',
+    'SkillExecutionPlan',
+    'SkillStep',
+    'RobotSkillInvoker',
+    'get_skill_invoker',
+    'SkillInvocationRequest',
+    'SkillInvocationResult',
+    'ObservationState',
+    'RobotAction',
 
     # Submodules
     'retargeting',

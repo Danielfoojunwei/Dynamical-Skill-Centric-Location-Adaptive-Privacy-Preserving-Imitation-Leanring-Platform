@@ -52,9 +52,9 @@ from src.platform.safety_manager import safety_manager, SafetyZone, SafetyConfig
 from src.platform.network_manager import network_manager
 from src.platform.observability.FHE_Auditor import FHEAuditor
 from src.platform.cloud.secure_aggregator import SecureAggregator
-from src.platform.cloud.ffm_client import UnifiedModelClient
+from src.platform.cloud.model_client import UnifiedModelClient
 from src.platform.observability.TraceManager import TraceManager
-from src.platform.cloud.vendor_adapter import VendorAdapter, Pi0VendorAdapter
+from src.platform.cloud.vendor_adapter_real import VendorAdapter, Pi0VendorAdapter
 from src.drivers.daimon_vtla import DaimonVendorAdapter
 
 # Initialize Managers
@@ -1314,20 +1314,37 @@ async def get_perception_tflops():
 
 
 # =============================================================================
-# Defensive Architecture API (v0.7.1)
+# Defensive Architecture API (v0.9.0)
 # =============================================================================
 # These endpoints provide access to the defensive components:
 # - Safety Shield: Deterministic safety checks (no ML dependency)
-# - Skill Blender: Stable multi-skill blending with guarantees
+# - Unified Skill Orchestrator: MoE-based skill routing and execution
 # - Timing Contracts: Performance metrics for each tier
+#
+# Note: SkillBlender was deprecated in v0.8.0 and removed in v0.9.0.
+# VLA handles multi-objective behavior implicitly via Deep Imitative Learning.
 
-from src.core.skill_blender import SkillBlender, BlendConfig, SkillOutput, ActionSpace as BlenderActionSpace
+from src.core.unified_skill_orchestrator import (
+    UnifiedSkillOrchestrator,
+    get_orchestrator,
+    OrchestrationRequest,
+    AssignmentStrategy,
+)
+from src.core.robot_skill_invoker import (
+    RobotSkillInvoker,
+    get_skill_invoker,
+    SkillInvocationRequest,
+    ObservationState,
+    InvocationMode,
+    ActionSpace as InvokerActionSpace,
+)
 from src.robot_runtime.safety_shield import SafetyShield, SafetyStatus
 from src.robot_runtime.config import SafetyConfig
 
 # Initialize defensive components
 _safety_shield = None
-_skill_blender = None
+_skill_orchestrator = None
+_skill_invoker = None
 
 
 def get_safety_shield() -> SafetyShield:
@@ -1340,19 +1357,20 @@ def get_safety_shield() -> SafetyShield:
     return _safety_shield
 
 
-def get_skill_blender() -> SkillBlender:
-    """Get or initialize skill blender."""
-    global _skill_blender
-    if _skill_blender is None:
-        config = BlendConfig(
-            confidence_threshold=0.3,
-            max_action_delta_per_second=2.0,
-            enable_jerk_limiting=True,
-            enable_confidence_weighting=True,
-        )
-        _skill_blender = SkillBlender(config=config, action_dim=7)
-        _skill_blender.register_skill("default", BlenderActionSpace.JOINT_POSITION, action_dim=7)
-    return _skill_blender
+def get_unified_orchestrator() -> UnifiedSkillOrchestrator:
+    """Get or initialize unified skill orchestrator (v0.9.0)."""
+    global _skill_orchestrator
+    if _skill_orchestrator is None:
+        _skill_orchestrator = get_orchestrator()
+    return _skill_orchestrator
+
+
+def get_unified_invoker() -> RobotSkillInvoker:
+    """Get or initialize skill invoker (v0.9.0)."""
+    global _skill_invoker
+    if _skill_invoker is None:
+        _skill_invoker = get_skill_invoker()
+    return _skill_invoker
 
 
 class SafetyCheckRequest(BaseModel):
@@ -1364,13 +1382,24 @@ class SafetyCheckRequest(BaseModel):
     humans: Optional[List[Dict[str, Any]]] = None
 
 
-class SkillBlendRequest(BaseModel):
-    """Request for skill blending."""
-    actions: List[List[float]]  # List of action vectors
-    confidences: List[float]
-    weights: List[float]
+class SkillOrchestrationRequest(BaseModel):
+    """Request for skill orchestration (v0.9.0)."""
+    task_description: str
+    robot_id: Optional[str] = None
+    workspace_id: Optional[str] = None
+    target_position: Optional[List[float]] = None
+    assignment_strategy: str = "nearest"
+    max_skills_per_step: int = 3
+
+
+class SkillInvocationAPIRequest(BaseModel):
+    """Request for skill invocation (v0.9.0)."""
+    task_description: Optional[str] = None
     skill_ids: Optional[List[str]] = None
-    dt: float = 0.01
+    blend_weights: Optional[List[float]] = None
+    joint_positions: List[float]
+    joint_velocities: List[float]
+    mode: str = "autonomous"
 
 
 @app.post("/api/v1/safety/check", dependencies=[Depends(get_api_key)])
@@ -1471,128 +1500,202 @@ async def get_safety_stats():
     }
 
 
-@app.post("/api/v1/skills/blend", dependencies=[Depends(get_api_key)])
-async def blend_skills(request: SkillBlendRequest):
+@app.post("/api/v1/skills/orchestrate", dependencies=[Depends(get_api_key)])
+async def orchestrate_task(request: SkillOrchestrationRequest):
     """
-    Blend multiple skill outputs with stability guarantees.
+    Orchestrate a task into an execution plan (v0.9.0).
 
-    Guarantees:
-    1. All actions normalized to [-1, 1]
-    2. Confidence-weighted blending
-    3. Jerk limiting for smooth transitions
-    4. Safe default on low confidence
+    This replaces the deprecated skill blending with intelligent task decomposition:
+    1. Decomposes task into skill sequence
+    2. Routes each sub-task to appropriate skills via MoE
+    3. Assigns robots based on spatial routing
+    4. Adapts skills for location context
 
     Returns:
-        blended_action: The blended action vector
-        adjusted_weights: Weights after confidence adjustment
-        stability_info: Information about stability measures applied
+        plan_id: Unique plan identifier
+        steps: List of execution steps with skill assignments
+        total_duration_ms: Estimated total duration
     """
     try:
-        blender = get_skill_blender()
+        orchestrator = get_unified_orchestrator()
 
-        # Create skill outputs
-        outputs = []
-        for i, (action, confidence) in enumerate(zip(request.actions, request.confidences)):
-            skill_id = request.skill_ids[i] if request.skill_ids and i < len(request.skill_ids) else "default"
-
-            # Ensure skill is registered
-            if skill_id not in blender._registered_skills:
-                blender.register_skill(skill_id, BlenderActionSpace.JOINT_POSITION, action_dim=len(action))
-
-            outputs.append(SkillOutput(
-                action=np.array(action, dtype=np.float32),
-                confidence=confidence,
-                skill_id=skill_id,
-                action_space=BlenderActionSpace.JOINT_POSITION,
-            ))
-
-        result = blender.blend(outputs, request.weights, dt=request.dt)
-
-        return {
-            "success": not result.used_safe_default,
-            "blended_action": result.action.tolist(),
-            "original_weights": result.original_weights,
-            "adjusted_weights": result.adjusted_weights,
-            "skill_ids": result.skill_ids,
-            "total_confidence": result.total_confidence,
-            "stability_info": {
-                "used_safe_default": result.used_safe_default,
-                "jerk_limited": result.jerk_limited,
-                "clipping_applied": result.clipping_applied,
-            },
-            "blend_time_ms": result.blend_time_ms,
+        # Convert strategy string to enum
+        strategy_map = {
+            "nearest": AssignmentStrategy.NEAREST,
+            "least_busy": AssignmentStrategy.LEAST_BUSY,
+            "capability": AssignmentStrategy.CAPABILITY,
+            "round_robin": AssignmentStrategy.ROUND_ROBIN,
         }
+        strategy = strategy_map.get(request.assignment_strategy, AssignmentStrategy.NEAREST)
+
+        # Create orchestration request
+        orch_request = OrchestrationRequest(
+            task_description=request.task_description,
+            robot_id=request.robot_id,
+            workspace_id=request.workspace_id,
+            target_position=np.array(request.target_position) if request.target_position else None,
+            assignment_strategy=strategy,
+            max_skills_per_step=request.max_skills_per_step,
+        )
+
+        result = orchestrator.orchestrate(orch_request)
+
+        if result.success:
+            return {
+                "success": True,
+                "plan_id": result.plan.plan_id,
+                "task_description": result.plan.task_description,
+                "steps": [
+                    {
+                        "step_id": step.step_id,
+                        "skill_ids": step.skill_ids,
+                        "weights": step.weights,
+                        "robot_id": step.robot_id,
+                        "workspace_id": step.workspace_id,
+                        "tier": step.tier.value,
+                        "deadline_ms": step.deadline_ms,
+                        "location_params": step.location_params,
+                    }
+                    for step in result.plan.steps
+                ],
+                "total_duration_ms": result.plan.total_estimated_duration_ms,
+                "orchestration_time_ms": result.orchestration_time_ms,
+            }
+        else:
+            return {"success": False, "error": result.error_message}
+
     except Exception as e:
-        logger.error(f"Skill blend error: {e}")
+        logger.error(f"Orchestration error: {e}")
         return {"success": False, "error": str(e)}
 
 
-@app.get("/api/v1/skills/blender/stats", dependencies=[Depends(get_api_key)])
-async def get_blender_stats():
-    """Get skill blender statistics."""
-    blender = get_skill_blender()
-    return blender.get_statistics()
+@app.post("/api/v1/skills/invoke", dependencies=[Depends(get_api_key)])
+async def invoke_skill(request: SkillInvocationAPIRequest):
+    """
+    Invoke skills for direct execution (v0.9.0).
+
+    For 200Hz control loop execution on edge devices.
+    """
+    try:
+        invoker = get_unified_invoker()
+
+        # Create observation state
+        obs = ObservationState(
+            joint_positions=np.array(request.joint_positions),
+            joint_velocities=np.array(request.joint_velocities),
+        )
+
+        # Convert mode string to enum
+        mode_map = {
+            "autonomous": InvocationMode.AUTONOMOUS,
+            "direct": InvocationMode.DIRECT,
+            "blended": InvocationMode.BLENDED,
+            "sequential": InvocationMode.SEQUENTIAL,
+        }
+        mode = mode_map.get(request.mode, InvocationMode.AUTONOMOUS)
+
+        # Create invocation request
+        inv_request = SkillInvocationRequest(
+            task_description=request.task_description,
+            skill_ids=request.skill_ids,
+            blend_weights=request.blend_weights,
+            observation=obs,
+            mode=mode,
+        )
+
+        result = invoker.invoke(inv_request)
+
+        return {
+            "success": result.success,
+            "actions": [
+                {
+                    "action_space": a.action_space.value,
+                    "joint_positions": a.joint_positions.tolist() if a.joint_positions is not None else None,
+                    "joint_velocities": a.joint_velocities.tolist() if a.joint_velocities is not None else None,
+                    "gripper_action": a.gripper_action,
+                    "skill_id": a.skill_id,
+                    "confidence": a.confidence,
+                }
+                for a in result.actions
+            ],
+            "skill_ids_used": result.skill_ids_used,
+            "blend_weights": result.blend_weights,
+            "safety_status": result.safety_status,
+            "total_time_ms": result.total_time_ms,
+        }
+
+    except Exception as e:
+        logger.error(f"Invocation error: {e}")
+        return {"success": False, "error": str(e)}
 
 
-@app.post("/api/v1/skills/blender/reset", dependencies=[Depends(get_api_key)])
-async def reset_blender():
-    """Reset skill blender temporal state (for new episode)."""
-    blender = get_skill_blender()
-    blender.reset_state()
-    return {"success": True, "message": "Blender state reset"}
+@app.get("/api/v1/skills/orchestrator/stats", dependencies=[Depends(get_api_key)])
+async def get_orchestrator_stats():
+    """Get skill orchestrator statistics (v0.9.0)."""
+    invoker = get_unified_invoker()
+    return invoker.get_statistics()
 
 
 @app.get("/api/v1/timing/contract", dependencies=[Depends(get_api_key)])
 async def get_timing_contract():
     """
-    Get the system timing contract.
+    Get the system timing contract (v0.9.0).
 
     This documents what runs at each tier with timing guarantees.
     """
     return {
-        "version": "0.7.1",
+        "version": "0.9.0",
         "tiers": {
             "tier0_safety": {
                 "rate_hz": 1000,
                 "max_latency_us": 500,
-                "components": ["SafetyShield", "JointLimits", "CollisionCheck"],
+                "components": ["CBFFilter", "RTASimplex", "SafetyShield"],
                 "constraints": [
                     "CPU-only (no GPU)",
                     "No network calls",
                     "No heap allocation after init",
                     "No ML model inference",
-                    "Deterministic execution time"
+                    "Deterministic execution time",
+                    "GUARANTEE: h(x) >= 0 invariant"
                 ]
             },
             "tier1_control": {
                 "rate_hz": 100,
                 "max_latency_ms": 5,
-                "components": ["StateEstimation", "PolicyInference", "SkillBlender"],
+                "components": ["RobotSkillInvoker", "CompositionVerifier", "RuntimeMonitor"],
                 "constraints": [
                     "Cached TensorRT only",
                     "No model loading",
                     "No network dependency"
-                ]
+                ],
+                "note": "SkillBlender removed in v0.9.0 - VLA handles multi-objective implicitly"
             },
             "tier2_perception": {
                 "rate_hz": "10-30",
                 "max_latency_ms": 100,
-                "components": ["CascadedPerception", "ObjectDetection", "Segmentation"],
+                "components": ["Pi0.5VLA", "DiffusionPlanner", "DINOv3", "SAM3", "V-JEPA2"],
                 "model_strategy": {
                     "level1": {"models": ["MobileNetV4", "YOLO-NAS-S"], "always_running": True},
-                    "level2": {"models": ["DINOv2-B", "SAM2"], "trigger": "confidence < 0.7"},
-                    "level3": {"models": ["DINOv2-G", "V-JEPA 2"], "trigger": "human detected or L2 failure"}
+                    "level2": {"models": ["DINOv3-B", "SAM3"], "trigger": "confidence < 0.7"},
+                    "level3": {"models": ["DINOv3-G", "V-JEPA 2"], "trigger": "human detected or L2 failure"}
                 }
             },
-            "tier3_cloud": {
+            "tier3_planning": {
+                "rate_hz": 1,
+                "max_latency_ms": 1000,
+                "components": ["UnifiedSkillOrchestrator", "TaskDecomposer", "MoERouter"],
+                "note": "Task decomposition and skill routing"
+            },
+            "tier4_cloud": {
                 "rate_hz": "async",
                 "latency": "seconds to hours",
-                "components": ["TelemetryUpload", "SkillSync", "MOAI_FHE"],
+                "components": ["TelemetryUpload", "SkillSync", "FederatedLearning", "MOAI_FHE"],
                 "note": "MOAI FHE is OFFLINE ONLY (~60s per forward pass)"
             }
         },
         "network_failure_behavior": "Robot continues indefinitely with cached skills and local perception",
-        "ml_safety_note": "ML predictions are ADVISORY ONLY. Safety shield uses deterministic checks."
+        "safety_guarantee": "CBF provides deterministic safety: h(x) >= 0 is invariant",
+        "architectural_change": "v0.9.0: SkillBlender removed, VLA handles multi-objective via Deep IL"
     }
 
 

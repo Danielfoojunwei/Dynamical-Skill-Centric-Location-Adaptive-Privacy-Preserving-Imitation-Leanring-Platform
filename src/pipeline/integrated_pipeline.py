@@ -127,8 +127,8 @@ except ImportError:
 from src.drivers.dyglove import DYGloveDriver
 from src.drivers.daimon_vtla import DaimonVTLAAdapter
 
-# Cloud / Platform
-from src.platform.cloud.ffm_client import FFMClient
+# Cloud / Platform (v0.9.0: using model_client directly)
+from src.platform.cloud.model_client import UnifiedModelClient as FFMClient  # Alias for compatibility
 from src.platform.cloud.secure_aggregator import SecureAggregator
 from src.platform.safety_manager import safety_manager
 

@@ -3,12 +3,42 @@ import requests
 import random
 import sys
 import os
+import numpy as np
 
 # Ensure we can import src
 sys.path.append(os.getcwd())
 
 from src.platform.edge.dyglove_sdk import DYGloveSimulator
-from src.platform.cloud.vendor_adapter import SimulatedVendorAdapter as MockVendorAdapter
+from src.platform.cloud.vendor_adapter_real import VendorAdapter
+
+
+class MockVendorAdapter(VendorAdapter):
+    """Mock vendor adapter for testing (v0.9.0)."""
+
+    def __init__(self):
+        self._gradient_buffer = np.random.randn(1000).astype(np.float32)
+        self._model_loaded = False
+
+    def connect(self):
+        return True
+
+    def disconnect(self):
+        pass
+
+    def load_weights(self, weights_path: str):
+        self._model_loaded = True
+
+    def infer(self, observation: dict) -> dict:
+        return {
+            "action": np.random.randn(7).tolist(),
+            "confidence": 0.85
+        }
+
+    def predict(self, observation: dict) -> dict:
+        return self.infer(observation)
+
+    def get_gradient_buffer(self) -> np.ndarray:
+        return self._gradient_buffer
 
 def run_robustness_test():
     print("=== Starting Full-Stack Robustness Test (Glove -> Cloud) ===")

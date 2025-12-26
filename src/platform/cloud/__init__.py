@@ -1,5 +1,5 @@
 """
-Cloud Services Module - Cloud Integration Layer
+Cloud Services Module - Cloud Integration Layer (v0.9.0)
 
 This module provides cloud connectivity for:
 - Model management (base VLA + skill library)
@@ -27,22 +27,28 @@ Usage:
     # Skill routing
     router = MoESkillRouter()
     skills = router.route_task("pick up the cup")
+
+Note: In v0.9.0, ffm_client.py and vendor_adapter.py stubs were removed.
+      Imports now point directly to the real implementations.
 """
 
-# Model client (unified entry point)
-from .ffm_client import (
+# Model client (unified entry point) - v0.9.0: direct import from real implementation
+from .model_client import (
     UnifiedModelClient,
     BaseModelClient,
     SkillLibraryClient,
     BaseModelInfo,
     SkillInfo,
     ModelClientConfig,
-    SecureAggregatorReal,
-    # Deprecated
-    FFMClient,
+    FFMClient,  # Deprecated alias
+)
+
+# Legacy FFM client (for backward compatibility)
+from .ffm_client_real import (
     FFMClientReal,
     FFMClientConfig,
-    get_default_client,
+    ModelVersion,
+    SecureAggregatorReal,
 )
 
 # MoE routing
@@ -59,8 +65,8 @@ from .federated_learning import (
     FederatedClient,
 )
 
-# Vendor adapters
-from .vendor_adapter import (
+# Vendor adapters - v0.9.0: direct import from real implementation
+from .vendor_adapter_real import (
     VendorAdapter,
     Pi0VendorAdapter,
     OpenVLAVendorAdapter,
@@ -73,6 +79,12 @@ from .secure_aggregator import (
     SecureAggregator,
     AggregatorConfig,
 )
+
+
+def get_default_client() -> UnifiedModelClient:
+    """Get default model client instance."""
+    return UnifiedModelClient()
+
 
 __all__ = [
     # Model client
@@ -106,8 +118,9 @@ __all__ = [
     'SecureAggregator',
     'AggregatorConfig',
 
-    # Deprecated
+    # Legacy (deprecated, will be removed in v1.0)
     'FFMClient',
     'FFMClientReal',
     'FFMClientConfig',
+    'ModelVersion',
 ]
