@@ -1,24 +1,44 @@
 """
-Spatial Intelligence Module - Pi0.5 Vision-Language-Action Model
+Spatial Intelligence Module - Deep Imitative Learning Stack
 
-This module provides spatial reasoning capabilities through Pi0.5,
-the official VLA model from Physical Intelligence.
+This module provides spatial reasoning and safe imitation learning through:
 
-Pi0.5 Features:
-- Pre-trained on 10k+ hours of robot data
-- Open-world generalization to unseen environments
-- Semantic task understanding
-- Multi-camera support
-- Proprioceptive conditioning
+1. **Pi0.5 VLA**: Official VLA from Physical Intelligence
+   - Pre-trained on 10k+ hours of robot data
+   - Open-world generalization
+   - Semantic task understanding
+
+2. **Diffusion Planner**: Smooth trajectory generation
+   - Score-based trajectory refinement
+   - Multi-modal action distributions
+   - Goal-conditioned planning
+
+3. **RIP Safety Gating**: Epistemic uncertainty for safety
+   - Ensemble disagreement detection
+   - Out-of-distribution detection
+   - Risk level classification
+
+4. **POIR Recovery**: Return-to-distribution planning
+   - Recovery trajectory generation
+   - World model simulation
+   - Multiple recovery strategies
 
 Usage:
-    from src.spatial_intelligence.pi0 import (
-        Pi05Model, Pi05Config, Pi05Observation
+    # Full Deep Imitative Learning pipeline
+    from src.spatial_intelligence import DeepImitativeLearning
+
+    dil = DeepImitativeLearning.for_jetson_thor()
+    dil.load()
+    result = dil.execute(
+        instruction="pick up the red cup",
+        images=camera_images,
     )
 
-    model = Pi05Model.for_jetson_thor()
-    model.load()
-    result = model.infer(Pi05Observation(images=img, instruction="pick up cup"))
+    # Or use individual components
+    from src.spatial_intelligence.pi0 import Pi05Model
+    from src.spatial_intelligence.planning import DiffusionPlanner
+    from src.spatial_intelligence.safety import RIPGating
+    from src.spatial_intelligence.recovery import POIRRecovery
 """
 
 import logging
@@ -71,6 +91,80 @@ except ImportError as e:
     VLAResult = None
     HardwareTarget = None
 
+# =============================================================================
+# Diffusion Planner
+# =============================================================================
+try:
+    from .planning import (
+        DiffusionPlanner,
+        DiffusionConfig,
+        Trajectory,
+        TrajectoryBatch,
+        DenoisingSchedule,
+    )
+except ImportError as e:
+    logger.debug(f"Diffusion Planner not available: {e}")
+    DiffusionPlanner = None
+    DiffusionConfig = None
+    Trajectory = None
+    TrajectoryBatch = None
+    DenoisingSchedule = None
+
+# =============================================================================
+# RIP Safety Gating
+# =============================================================================
+try:
+    from .safety import (
+        RIPGating,
+        RIPConfig,
+        SafetyDecision,
+        UncertaintyEstimate,
+        RiskLevel,
+    )
+except ImportError as e:
+    logger.debug(f"RIP Safety not available: {e}")
+    RIPGating = None
+    RIPConfig = None
+    SafetyDecision = None
+    UncertaintyEstimate = None
+    RiskLevel = None
+
+# =============================================================================
+# POIR Recovery
+# =============================================================================
+try:
+    from .recovery import (
+        POIRRecovery,
+        POIRConfig,
+        RecoveryPlan,
+        RecoveryStatus,
+        RecoveryStrategy,
+    )
+except ImportError as e:
+    logger.debug(f"POIR Recovery not available: {e}")
+    POIRRecovery = None
+    POIRConfig = None
+    RecoveryPlan = None
+    RecoveryStatus = None
+    RecoveryStrategy = None
+
+# =============================================================================
+# Deep Imitative Learning Integration
+# =============================================================================
+try:
+    from .deep_imitative_learning import (
+        DeepImitativeLearning,
+        DILConfig,
+        DILResult,
+        ExecutionMode,
+    )
+except ImportError as e:
+    logger.debug(f"Deep Imitative Learning not available: {e}")
+    DeepImitativeLearning = None
+    DILConfig = None
+    DILResult = None
+    ExecutionMode = None
+
 
 __all__ = [
     # Pi0.5 Official
@@ -90,4 +184,31 @@ __all__ = [
     'VLAObservation',
     'VLAResult',
     'HardwareTarget',
+
+    # Diffusion Planner
+    'DiffusionPlanner',
+    'DiffusionConfig',
+    'Trajectory',
+    'TrajectoryBatch',
+    'DenoisingSchedule',
+
+    # RIP Safety
+    'RIPGating',
+    'RIPConfig',
+    'SafetyDecision',
+    'UncertaintyEstimate',
+    'RiskLevel',
+
+    # POIR Recovery
+    'POIRRecovery',
+    'POIRConfig',
+    'RecoveryPlan',
+    'RecoveryStatus',
+    'RecoveryStrategy',
+
+    # Deep Imitative Learning
+    'DeepImitativeLearning',
+    'DILConfig',
+    'DILResult',
+    'ExecutionMode',
 ]
