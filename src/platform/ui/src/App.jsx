@@ -37,6 +37,9 @@ import {
   WifiOff,
   Menu,
   ChevronLeft,
+  Building2,
+  History,
+  GitBranch,
 } from 'lucide-react';
 import { clsx } from 'clsx';
 
@@ -70,6 +73,11 @@ const TrainingManager = lazy(() => import('./TrainingManager'));
 const PerceptionManager = lazy(() => import('./PerceptionManager'));
 const SimulationDashboard = lazy(() => import('./SimulationDashboard'));
 
+// New integrator pages
+const DeploymentManager = lazy(() => import('./DeploymentManager'));
+const AuditLog = lazy(() => import('./AuditLog'));
+const VersionControl = lazy(() => import('./VersionControl'));
+
 // Create React Query client
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -80,16 +88,19 @@ const queryClient = new QueryClient({
   },
 });
 
-// Navigation items
+// Navigation items - organized by category for system integrators
 const navItems = [
   { path: '/', label: 'Dashboard', icon: LayoutDashboard },
-  { path: '/perception', label: 'Perception', icon: Brain },
-  { path: '/simulation', label: 'Simulation', icon: Play },
-  { path: '/devices', label: 'Devices', icon: Server },
-  { path: '/skills', label: 'Skills', icon: Zap },
+  { path: '/deployments', label: 'Deployments', icon: Building2 },
   { path: '/observability', label: 'Observability', icon: Eye },
-  { path: '/training', label: 'Training', icon: Database },
+  { path: '/skills', label: 'Skills', icon: Zap },
+  { path: '/devices', label: 'Devices', icon: Server },
+  { path: '/perception', label: 'Perception', icon: Brain },
   { path: '/safety', label: 'Safety', icon: Shield },
+  { path: '/simulation', label: 'Simulation', icon: Play },
+  { path: '/training', label: 'Training', icon: Database },
+  { path: '/versions', label: 'Versions', icon: GitBranch },
+  { path: '/audit', label: 'Audit Log', icon: History },
   { path: '/cloud', label: 'Cloud', icon: Cloud },
   { path: '/settings', label: 'Settings', icon: Settings },
 ];
@@ -311,6 +322,7 @@ function AppContent() {
           <Suspense fallback={<LoadingSpinner />}>
             <Routes>
               <Route path="/" element={<Dashboard />} />
+              <Route path="/deployments" element={<DeploymentManager />} />
               <Route path="/perception" element={<PerceptionManager />} />
               <Route path="/simulation" element={<SimulationDashboard />} />
               <Route path="/devices" element={<DeviceManager />} />
@@ -318,6 +330,8 @@ function AppContent() {
               <Route path="/observability" element={<Observability />} />
               <Route path="/training" element={<TrainingManager />} />
               <Route path="/safety" element={<SafetyPage />} />
+              <Route path="/versions" element={<VersionControl />} />
+              <Route path="/audit" element={<AuditLog />} />
               <Route path="/cloud" element={<CloudIntegration />} />
               <Route path="/settings" element={<SettingsPage />} />
             </Routes>

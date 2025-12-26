@@ -83,6 +83,14 @@ try:
 except ImportError as e:
     logger.warning(f"Simulation WebSocket router not available: {e}")
 
+# Include Integrator API router for system integrator features
+try:
+    from .integrator_api import router as integrator_router
+    app.include_router(integrator_router)
+    logger.info("Integrator API router enabled")
+except ImportError as e:
+    logger.warning(f"Integrator API router not available: {e}")
+
 # Start Network Manager
 @app.on_event("startup")
 async def startup_event():
