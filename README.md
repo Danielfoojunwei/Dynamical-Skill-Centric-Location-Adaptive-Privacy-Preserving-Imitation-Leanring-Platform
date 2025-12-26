@@ -235,6 +235,497 @@ src/
 
 ---
 
+## ROS2 Integration
+
+The platform integrates with ROS2 (Humble/Iron) for robot communication.
+
+### Message Types (`src/ros2/dynamical_msgs/`)
+
+| Message | Purpose |
+|---------|---------|
+| `RobotState.msg` | Joint positions, velocities, torques, temperatures, EE pose @ 1kHz |
+| `Detection.msg` | Object detections with 2D/3D position, tracking, obstacle/human flags |
+| `SafetyStatus.msg` | Safety violations, human/obstacle detection, status enum |
+| `PerceptionFeatures.msg` | Cascade perception output (detections, depth, segmentation) |
+| `SkillStatus.msg` | Skill execution progress and phase |
+
+### Services & Actions
+
+**Services** (synchronous):
+```
+ExecuteSkill.srv      - Execute skill with parameters
+TriggerEstop.srv      - Emergency stop
+ResetEstop.srv        - Clear E-stop
+GetRobotState.srv     - Query current state
+LoadSkill.srv         - Load skill from library
+SetControlMode.srv    - Switch control modes
+```
+
+**Actions** (async with progress):
+```
+ExecuteSkillAction.action  - Skill execution with phase feedback
+MoveToPosition.action      - Goal-based positioning
+```
+
+### ROS2 Bridge Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                           ROS2 BRIDGE (ros2_bridge.py)                          │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  Dynamical Python Runtime                      ROS2 Ecosystem                   │
+│  ┌─────────────────────────┐                 ┌─────────────────────────┐        │
+│  │  Robot Runtime Agent    │◄───────────────►│  /dynamical/robot_state │        │
+│  │  SafetyShield           │◄───────────────►│  /dynamical/safety      │        │
+│  │  SkillExecutor          │◄───────────────►│  /dynamical/skills/*    │        │
+│  │  PerceptionPipeline     │◄───────────────►│  /dynamical/perception  │        │
+│  └─────────────────────────┘                 └─────────────────────────┘        │
+│                                                                                  │
+│  Configuration:                                                                  │
+│  - Node: "robot_runtime_bridge" in namespace "dynamical"                        │
+│  - QoS depth: 10 (buffered)                                                     │
+│  - Executor: MultiThreaded with ReentrantCallbackGroup                          │
+│  - Fallback: Standalone mode if ROS2 unavailable                                │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Detection & Safety System
+
+### 3-Level Hierarchical Safety
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                        SAFETY HIERARCHY (Cannot be overridden)                   │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  LEVEL 0: HARDWARE E-STOP (Physical, cannot be software-overridden)             │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐│
+│  │  • Physical button → direct motor power cut                                 ││
+│  │  • Capacitive human proximity sensor → immediate halt                       ││
+│  │  • Hardware watchdog: No heartbeat for 2ms → power cut                      ││
+│  └─────────────────────────────────────────────────────────────────────────────┘│
+│                                                                                  │
+│  LEVEL 1: DETERMINISTIC SOFTWARE (1kHz, <500μs, CPU-only)                       │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐│
+│  │  Hard-coded limits from URDF (cannot be changed at runtime):                ││
+│  │  • Joint position: ±2° margin from URDF limits                              ││
+│  │  • Joint velocity: Per-joint, temperature-compensated                       ││
+│  │  • Joint torque: Motor spec ±10% margin                                     ││
+│  │  • Obstacle proximity: 10cm minimum clearance (CBF enforced)                ││
+│  │  • Self-collision: Pre-computed collision pairs                             ││
+│  └─────────────────────────────────────────────────────────────────────────────┘│
+│                                                                                  │
+│  LEVEL 2: ML-ASSISTED ADVISORS (30Hz, informational only)                       │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐│
+│  │  ⚠️ CANNOT OVERRIDE LEVEL 0 OR 1 - Advisory only                            ││
+│  │  • V-JEPA future prediction → "caution" flag                                ││
+│  │  • Human intent prediction → speed reduction suggestion                     ││
+│  │  • Anomaly detection → log + alert (operator must acknowledge)              ││
+│  └─────────────────────────────────────────────────────────────────────────────┘│
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### What Gets Detected
+
+| Detection Type | Method | Threshold | Action |
+|----------------|--------|-----------|--------|
+| **Joint Limits** | URDF comparison | ±0.035 rad (2°) | Block motion |
+| **Velocity Limits** | Per-joint check | 90% of max | Block/reduce |
+| **Torque Limits** | Motor spec | 90% of max | Block motion |
+| **Obstacles** | DINOv3 + SAM3 → sphere approx | 0.1m minimum | CBF constraint |
+| **Humans** | RTMPose detection | 0.5m safety zone | Reduce speed or stop |
+| **Self-Collision** | Pre-computed pairs | Sphere overlap | Block motion |
+| **Heartbeat Loss** | Watchdog timer | 10ms | E-stop trigger |
+
+### CBF Barrier Functions (`src/safety/cbf/`)
+
+Control Barrier Functions guarantee `h(x) ≥ 0` is invariant:
+
+```python
+# Barrier principle: h(x) ≥ 0 is safe, maintained by ḣ + α·h ≥ 0
+
+Barrier Types:
+├── Joint Position Barriers (per-joint upper/lower limits)
+├── Joint Velocity Barriers (max velocity enforcement)
+├── Obstacle Distance Barriers (min clearance from segmented objects)
+└── Self-Collision Barriers (pre-computed collision pairs)
+
+# If proposed action would violate:
+constraint(state, action) = ∇h · action + α·h ≥ 0
+# Solve QP to find minimal modification that satisfies constraint
+```
+
+### Safety States & Violations
+
+```python
+SafetyStatus:
+  OK (0)        → Normal operation
+  WARNING (1)   → Speed reduction applied
+  VIOLATION (2) → Controlled stop in progress
+  ESTOP (3)     → Emergency stop active
+
+ViolationSeverity:
+  INFO      → Logged, no action
+  WARNING   → Speed reduced 50%
+  VIOLATION → Controlled stop
+  CRITICAL  → Immediate E-stop
+```
+
+---
+
+## RTMPose Integration
+
+Real-time 2D pose estimation for human body tracking.
+
+### Pipeline (`src/core/pose_inference/rtmpose_real.py`)
+
+```
+Input Image
+     │
+     ▼
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│  RTMPOSE PIPELINE                                                                │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  1. ROI Extraction                                                               │
+│     • Bounding box from detector + 25% padding                                  │
+│     • Resize to model input (192×256 or 288×384)                                │
+│                                                                                  │
+│  2. Preprocessing                                                                │
+│     • BGR→RGB conversion                                                         │
+│     • ImageNet normalization (mean/std)                                         │
+│     • CHW format + batch dimension                                              │
+│                                                                                  │
+│  3. ONNX Inference (CUDA or CPU fallback)                                       │
+│     • rtmpose-m: 17 COCO keypoints (body)                                       │
+│     • rtmw-x-wholebody: 133 keypoints (body+hands+face)                         │
+│                                                                                  │
+│  4. SimCC Decoding                                                               │
+│     • Two 1D heatmaps per keypoint (X and Y)                                    │
+│     • Softmax → probability distributions                                       │
+│     • Argmax → coordinate extraction                                            │
+│     • Score = min(x_confidence, y_confidence)                                   │
+│                                                                                  │
+│  5. Output: Pose2DResult                                                         │
+│     • keypoints [N_persons, 17/133, 3]: [x, y, confidence]                      │
+│     • bboxes [N_persons, 5]: [x1, y1, x2, y2, score]                            │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+     │
+     ▼
+GMR Retargeting (human → robot motion)
+```
+
+### Model Options
+
+| Model | Input Size | Keypoints | Use Case |
+|-------|-----------|-----------|----------|
+| `rtmpose-s` | 192×256 | 17 (COCO) | Fast, low resource |
+| `rtmpose-m` | 192×256 | 17 (COCO) | **Default**, balanced |
+| `rtmpose-l` | 192×256 | 17 (COCO) | High accuracy |
+| `rtmw-x-wholebody` | 288×384 | 133 | Full body+hands+face |
+
+---
+
+## MANUS Glove Integration
+
+High-precision hand tracking with haptic feedback.
+
+### Supported Hardware
+
+- MANUS Quantum (highest precision)
+- MANUS Prime Series
+- MANUS Metaglove
+
+### 21-DOF Hand Model (`src/platform/edge/manus_sdk.py`)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                         MANUS → DYGLOVE MAPPING (21 DOF)                         │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  THUMB (5 DOF, indices 0-4):                                                    │
+│  ├─ CMC Flexion     → tm_flex (0)                                               │
+│  ├─ CMC Spread      → tm_abd  (1)                                               │
+│  ├─ MCP Flexion     → mcp     (2)                                               │
+│  ├─ IP Flexion      → ip      (3)                                               │
+│  └─ Wrist Pro/Sup   → wrist_ps (4, from IMU quaternion)                         │
+│                                                                                  │
+│  INDEX (4 DOF, indices 5-8):                                                    │
+│  ├─ MCP Flexion     → mcp_flex (5)                                              │
+│  ├─ MCP Abduction   → mcp_abd  (6)                                              │
+│  ├─ PIP Flexion     → pip      (7)                                              │
+│  └─ DIP Flexion     → dip      (8)                                              │
+│                                                                                  │
+│  MIDDLE (4 DOF, indices 9-12):  Same pattern                                    │
+│  RING (4 DOF, indices 13-16):   Same pattern                                    │
+│  PINKY (4 DOF, indices 17-20):  Same pattern                                    │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Data Flow
+
+```python
+# Connection
+driver = ManusGloveDriver(side=Hand.RIGHT)
+driver.connect()  # Blocks until glove found (5s timeout)
+
+# Reading state (120Hz default)
+state = driver.get_state()  # → GloveState with 21-DOF angles
+wrist_orientation = state.wrist_orientation  # Quaternion from IMU
+
+# Streaming callback
+driver.start_streaming(callback, rate_hz=120.0)
+
+# Haptic feedback (vibration per finger)
+driver.set_haptic_feedback(fingers=[0,1,2], intensity=0.8)
+```
+
+### Discovery Methods
+
+1. Native SDK discovery (if MANUS SDK installed)
+2. ROS2 topic discovery (`/manus_glove_*` topics)
+3. Network broadcast (ports 49220, 49221)
+
+---
+
+## Skill Compositionality
+
+Formal contracts enabling safe skill composition with verification.
+
+### Contract Structure (`src/composition/contracts.py`)
+
+```python
+SkillContract:
+  name: str                        # Unique skill identifier
+  preconditions: PredicateSet      # Must hold BEFORE execution
+  postconditions: PredicateSet     # Guaranteed AFTER execution
+  invariants: PredicateSet         # Must hold DURING execution
+  min_duration / max_duration      # Timing bounds
+  executor: Callable               # Actual implementation
+```
+
+### Standard Predicates
+
+| Predicate | Check | Used By |
+|-----------|-------|---------|
+| `GRIPPER_OPEN` | `gripper_state < 0.5` | grasp, release |
+| `GRIPPER_CLOSED` | `gripper_state > 0.5` | lift, place |
+| `OBJECT_VISIBLE` | `object_detected == True` | grasp |
+| `HOLDING_OBJECT` | `holding == True` | lift, place |
+| `AT_TARGET` | `at_target == True` | grasp, place |
+| `ROBOT_STATIONARY` | `‖velocity‖ < 0.01` | place |
+| `PATH_CLEAR` | `path_clear == True` | reach, retract |
+
+### Standard Skill Library (`src/composition/library.py`)
+
+```
+reach:   PATH_CLEAR → AT_TARGET                    [0.5-5.0s]
+grasp:   AT_TARGET + GRIPPER_OPEN + OBJECT_VISIBLE → HOLDING_OBJECT [0.2-2.0s]
+lift:    HOLDING_OBJECT + GRIPPER_CLOSED → HOLDING_OBJECT [0.3-3.0s]
+place:   HOLDING_OBJECT + AT_TARGET → GRIPPER_OPEN [0.3-3.0s]
+release: GRIPPER_CLOSED → GRIPPER_OPEN             [0.1-1.0s]
+retract: GRIPPER_OPEN → PATH_CLEAR                 [0.3-3.0s]
+```
+
+### Composition Verification
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                      SKILL COMPOSITION VERIFICATION                              │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  Skill Chain: reach → grasp → lift → place → release → retract                 │
+│                                                                                  │
+│  For each transition (SkillA → SkillB):                                         │
+│    ✓ SkillA.postconditions ⊆ SkillB.preconditions?                              │
+│                                                                                  │
+│  Example: grasp → lift                                                           │
+│    grasp.post   = {HOLDING_OBJECT, GRIPPER_CLOSED}                              │
+│    lift.pre     = {HOLDING_OBJECT, GRIPPER_CLOSED}                              │
+│    ✓ Valid transition (post satisfies pre)                                      │
+│                                                                                  │
+│  Runtime Verification:                                                           │
+│  1. Pre-execution:  Check preconditions on current state                        │
+│  2. During:         Monitor invariants (no violation allowed)                   │
+│  3. Post-execution: Verify postconditions actually hold                         │
+│  4. Composition:    Validate next skill can run                                 │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Federated Learning Pipeline
+
+Privacy-preserving distributed training across robot fleet.
+
+### 7-Stage Pipeline (`src/federated/unified_pipeline.py`)
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                     FEDERATED LEARNING PIPELINE                                  │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  CLIENT (Edge)                                                                   │
+│  ─────────────                                                                   │
+│  Gradients                                                                       │
+│      │                                                                           │
+│      ▼                                                                           │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐│
+│  │ Stage 1: GRADIENT CLIPPING                                                  ││
+│  │ • Clips ‖g‖ to max_norm (default 1.0)                                       ││
+│  │ • Bounds magnitude BEFORE lossy operations                                  ││
+│  │ • Enables differential privacy guarantees                                   ││
+│  └─────────────────────────────────────────────────────────────────────────────┘│
+│      │                                                                           │
+│      ▼                                                                           │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐│
+│  │ Stage 2: ERROR FEEDBACK                                                     ││
+│  │ • Adds accumulated residuals from previous rounds                           ││
+│  │ • g[t] += decay × residuals[t-1]                                            ││
+│  │ • Prevents "unfairly dropped" gradients from being lost                     ││
+│  └─────────────────────────────────────────────────────────────────────────────┘│
+│      │                                                                           │
+│      ▼                                                                           │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐│
+│  │ Stage 3: TOP-K SPARSIFICATION                                               ││
+│  │ • Keeps top 1% of gradients by magnitude                                    ││
+│  │ • Reduces communication by 99%                                              ││
+│  │ • Stores residual for error feedback                                        ││
+│  └─────────────────────────────────────────────────────────────────────────────┘│
+│      │                                                                           │
+│      ▼                                                                           │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐│
+│  │ Stage 4: ADAPTIVE MOAI COMPRESSION                                          ││
+│  │ • Quantization: bits = max(2, 32/compression_ratio)                         ││
+│  │ • Compression ratio: 8x-128x (adapts to quality feedback)                   ││
+│  │ • Target quality: 95% retained                                              ││
+│  └─────────────────────────────────────────────────────────────────────────────┘│
+│      │                                                                           │
+│      ▼                                                                           │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐│
+│  │ Stage 5: QUALITY MONITOR (Observer)                                         ││
+│  │ • Tracks: compression_quality, clip_ratio, sparsity, fhe_noise             ││
+│  │ • Alerts: COMPRESSION_DEGRADED, CLIPPING_AGGRESSIVE, FHE_NOISE_HIGH        ││
+│  │ • Provides feedback to Stage 4 for adaptation                               ││
+│  └─────────────────────────────────────────────────────────────────────────────┘│
+│      │                                                                           │
+│      ▼                                                                           │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐│
+│  │ Stage 6: NOISE-AWARE FHE (N2HE Encryption)                                  ││
+│  │ • LWE-based encryption (128-bit post-quantum security)                      ││
+│  │ • Noise budget tracking (bootstraps when <20% remains)                      ││
+│  │ • Homomorphic addition: Enc(a) + Enc(b) = Enc(a+b)                          ││
+│  └─────────────────────────────────────────────────────────────────────────────┘│
+│      │                                                                           │
+│      ▼                                                                           │
+│  Encrypted Update ────────────────────────────────────────────────► CLOUD       │
+│                                                                                  │
+│  CLOUD (Aggregation)                                                             │
+│  ──────────────────                                                              │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐│
+│  │ Stage 7: HIERARCHICAL AGGREGATION                                           ││
+│  │ • Tree structure: 10 clients per aggregator node                            ││
+│  │ • Max depth: 4 levels                                                       ││
+│  │ • Reduces FHE operations: O(log N) instead of O(N)                          ││
+│  │ • All aggregation done on encrypted data (server never sees gradients)     ││
+│  └─────────────────────────────────────────────────────────────────────────────┘│
+│      │                                                                           │
+│      ▼                                                                           │
+│  Decrypted Aggregated Model (only server can decrypt)                           │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Privacy Guarantees
+
+| Stage | Privacy Contribution |
+|-------|---------------------|
+| Gradient Clipping | Bounded sensitivity for differential privacy |
+| Sparsification | Information loss (99% of gradients dropped) |
+| Compression | Quantization noise hides exact values |
+| FHE Encryption | Semantic security (cannot decrypt without key) |
+| Hierarchical Agg | Aggregation on encrypted data only |
+
+---
+
+## N2HE / MOAI Encryption
+
+Homomorphic encryption for privacy-preserving computation.
+
+### N2HE Parameters (`src/moai/n2he.py`)
+
+```python
+N2HE_128 (standard):
+  n (LWE dimension):          1024
+  q (ciphertext modulus):     2^32
+  σ (error std dev):          3.2
+  t (plaintext modulus):      2^16
+  Security:                   128-bit post-quantum
+
+N2HE_192 (high security):
+  n: 1536, q: 2^48, t: 2^16
+  Security:                   192-bit post-quantum
+```
+
+### LWE Ciphertext Structure
+
+```
+Ciphertext ct = (a, b) where:
+  a: Random vector [n]
+  b: <a, s> + e + Δ·m  (s = secret key, e = small error, m = message)
+
+Properties:
+  • Additive homomorphism: Enc(m₁) + Enc(m₂) = Enc(m₁+m₂)
+  • Scalar multiplication: c × Enc(m) = Enc(c×m)
+  • Noise budget: Decreases with each operation (bootstrap to refresh)
+```
+
+### MOAI FHE Context (`src/moai/moai_fhe.py`)
+
+**⚠️ WARNING: OFFLINE ONLY - NOT REAL-TIME CAPABLE**
+
+| Operation | Latency | Use Case |
+|-----------|---------|----------|
+| FHE attention (512-dim) | ~30 seconds | Offline analysis |
+| Full transformer forward | ~60 seconds | Batch processing |
+| Batch of 100 demos | ~2 hours | Overnight training |
+
+**Appropriate Use Cases:**
+- ✅ Overnight batch processing of encrypted demonstrations
+- ✅ Privacy-preserving skill distillation (hours latency OK)
+- ✅ Compliance audit on encrypted logs
+- ✅ Weekly analytics on encrypted fleet data
+
+**DO NOT USE FOR:**
+- ❌ Real-time inference (impossible)
+- ❌ Control loop integration (violates timing contract)
+- ❌ Online learning (latency incompatible)
+- ❌ Anything requiring <1 second latency
+
+### Integration with Federated Learning
+
+```
+Client Gradients
+     ↓
+Stage 4: Compress (8x-128x)
+     ↓
+Stage 6: N2HE Encrypt
+     ↓  ← LWECiphertext with noise budget tracking
+Stage 7: Homomorphic Aggregation
+     ↓  ← Tree-based: Enc(a) + Enc(b) = Enc(a+b)
+Server Decrypt (only holder of secret key)
+```
+
+---
+
 ## Quick Start
 
 ### Installation
