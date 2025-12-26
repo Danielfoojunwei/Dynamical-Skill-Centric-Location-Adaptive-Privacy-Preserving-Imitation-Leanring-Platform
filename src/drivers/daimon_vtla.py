@@ -3,7 +3,7 @@ import time
 import os
 import numpy as np
 from typing import Dict, Any, Optional
-from src.platform.cloud.vendor_adapter import VendorAdapter
+from src.platform.cloud.vendor_adapter_real import VendorAdapter
 
 from src.platform.logging_utils import get_logger
 
