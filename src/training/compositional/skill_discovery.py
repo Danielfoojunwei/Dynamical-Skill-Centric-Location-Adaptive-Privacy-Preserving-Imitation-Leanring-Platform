@@ -156,35 +156,72 @@ class SkillSegmenter:
 
         # Load SAM3
         try:
-            from ...meta_ai import SAM3Wrapper
-            self._sam3 = SAM3Wrapper(device=self.config.device)
+            from ...meta_ai.sam3 import SAM3Segmenter, SAM3Config
+            sam3_config = SAM3Config(
+                model_size="sam3_large",  # Use large for efficiency
+                device=self.config.device,
+            )
+            self._sam3 = SAM3Segmenter(sam3_config)
+            self._sam3.load_model()
             logger.info("Loaded SAM3 for object segmentation")
-        except ImportError:
-            logger.warning("SAM3 not available")
+        except ImportError as e:
+            logger.warning(f"SAM3 not available: {e}")
+        except Exception as e:
+            logger.warning(f"Failed to load SAM3: {e}")
 
         # Load DINOv3
         try:
-            from ...meta_ai import DINOv3Wrapper
-            self._dino = DINOv3Wrapper(
-                model_name=self.config.dino_model,
+            from ...meta_ai.dinov3 import DINOv3Encoder, DINOv3Config
+
+            # Map config model name to actual size
+            dino_size_map = {
+                "dinov3_small": "small",
+                "dinov3_base": "base",
+                "dinov3_large": "large",
+                "dinov3_giant": "giant",
+            }
+            dino_size = dino_size_map.get(self.config.dino_model, "large")
+
+            dino_config = DINOv3Config(
+                model_size=dino_size,
                 device=self.config.device,
             )
-            logger.info("Loaded DINOv3 for feature extraction")
-        except ImportError:
-            logger.warning("DINOv3 not available")
+            self._dino = DINOv3Encoder(dino_config)
+            self._dino.load_model()
+            logger.info(f"Loaded DINOv3 ({dino_size}) for feature extraction")
+        except ImportError as e:
+            logger.warning(f"DINOv3 not available: {e}")
+        except Exception as e:
+            logger.warning(f"Failed to load DINOv3: {e}")
 
         # Load V-JEPA2
         try:
-            from ...meta_ai import VJEPA2Wrapper
-            self._vjepa = VJEPA2Wrapper(
-                model_name=self.config.vjepa_model,
+            from ...meta_ai.vjepa2 import VJEPA2WorldModel, VJEPA2Config
+
+            # Map config model name to actual size
+            vjepa_size_map = {
+                "vjepa2_base": "base",
+                "vjepa2_large": "large",
+                "vjepa2_huge": "huge",
+                "vjepa2_giant": "giant",
+            }
+            vjepa_size = vjepa_size_map.get(self.config.vjepa_model, "base")
+
+            vjepa_config = VJEPA2Config(
+                model_size=vjepa_size,
                 device=self.config.device,
             )
-            logger.info("Loaded V-JEPA2 for temporal modeling")
-        except ImportError:
-            logger.warning("V-JEPA2 not available")
+            self._vjepa = VJEPA2WorldModel(vjepa_config)
+            self._vjepa.load_model()
+            logger.info(f"Loaded V-JEPA2 ({vjepa_size}) for temporal modeling")
+        except ImportError as e:
+            logger.warning(f"V-JEPA2 not available: {e}")
+        except Exception as e:
+            logger.warning(f"Failed to load V-JEPA2: {e}")
 
         self._loaded = True
+        logger.info(f"Skill segmentation models loaded: SAM3={self._sam3 is not None}, "
+                   f"DINOv3={self._dino is not None}, V-JEPA2={self._vjepa is not None}")
 
     def segment_demonstration(
         self,

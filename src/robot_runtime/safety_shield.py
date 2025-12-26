@@ -651,6 +651,84 @@ class SafetyShield:
             "ml_collision_warning": self.state.ml_collision_warning,
         }
 
+    def integrate_perception_safety(self, safety_data: 'SafetyPerceptionData') -> None:
+        """
+        Integrate perception-based safety data.
+
+        This method bridges the gap between Meta AI perception (SAM3, V-JEPA2)
+        and deterministic safety checks.
+
+        Args:
+            safety_data: SafetyPerceptionData from PerceptionSafetyBridge
+        """
+        # Update obstacle distance from perception
+        if safety_data.valid:
+            self.state.min_obstacle_distance = safety_data.min_obstacle_distance
+            self.state.human_detected = safety_data.human_detected
+
+            # V-JEPA2 predictions are advisory
+            self.state.ml_collision_probability = safety_data.collision_probability
+            self.state.ml_collision_warning = safety_data.collision_probability > 0.5
+
+            # Speed factor from perception integration
+            self.state.ml_speed_reduction_factor = safety_data.speed_factor
+
+    def check_with_perception(
+        self,
+        robot_state: Dict[str, Any],
+        safety_data: Optional['SafetyPerceptionData'] = None,
+    ) -> 'SafetyCheckResult':
+        """
+        Combined safety check with perception integration.
+
+        This is the recommended entry point for safety checks when
+        Meta AI perception data is available.
+
+        Args:
+            robot_state: Robot state dictionary
+            safety_data: Optional perception safety data
+
+        Returns:
+            SafetyCheckResult with action and status
+        """
+        # First integrate perception data
+        if safety_data is not None:
+            self.integrate_perception_safety(safety_data)
+
+            # Update robot state with perception data
+            robot_state = self._merge_perception_state(robot_state, safety_data)
+
+        # Then run standard safety checks
+        return self.check_safety(robot_state)
+
+    def _merge_perception_state(
+        self,
+        robot_state: Dict[str, Any],
+        safety_data: 'SafetyPerceptionData',
+    ) -> Dict[str, Any]:
+        """Merge perception safety data into robot state."""
+        merged = robot_state.copy()
+
+        # Add obstacle data for CBF
+        merged['obstacle_positions'] = safety_data.obstacle_positions
+        merged['obstacle_radii'] = safety_data.obstacle_radii
+        merged['min_obstacle_distance'] = safety_data.min_obstacle_distance
+
+        # Add human detections
+        merged['humans'] = [
+            {'detected': True, 'distance': safety_data.min_obstacle_distance}
+            for _ in range(safety_data.num_humans)
+        ]
+
+        return merged
+
+
+# Type hint import for SafetyPerceptionData
+try:
+    from .perception_integration import SafetyPerceptionData
+except ImportError:
+    SafetyPerceptionData = Any  # type: ignore
+
 
 # =============================================================================
 # Tests
