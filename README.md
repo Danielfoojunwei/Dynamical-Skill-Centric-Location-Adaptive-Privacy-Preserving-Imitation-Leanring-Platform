@@ -16,6 +16,7 @@
 - **Deep Imitative Learning**: Diffusion Planner + RIP + POIR integration
 - **Pi0.5 VLA**: Official Physical Intelligence integration via openpi
 - **No Skill Blending**: VLA handles multi-objective implicitly (blending deprecated)
+- **Compositional Training**: Automatic skill discovery from ONVIF/MANUS streams using Meta AI
 
 ---
 
@@ -250,6 +251,71 @@ robot.send_command(safe_result.action)  # GUARANTEED safe
 
 ---
 
+## Compositional Training (v0.8.0)
+
+**Solves training compositionality** using existing infrastructure:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                    COMPOSITIONAL TRAINING PIPELINE                               │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  CONTINUOUS DATA CAPTURE (Already Have)                                          │
+│  ┌──────────────┐   ┌──────────────┐   ┌──────────────┐                         │
+│  │ ONVIF Cameras│   │ MANUS Gloves │   │Robot Proprio │                         │
+│  └──────┬───────┘   └──────┬───────┘   └──────┬───────┘                         │
+│         └──────────────────┼──────────────────┘                                  │
+│                            ▼                                                     │
+│  META AI SEGMENTATION (Already Have)                                             │
+│  ┌──────────────┐   ┌──────────────┐   ┌──────────────┐                         │
+│  │     SAM3     │   │    DINOv3    │   │   V-JEPA2    │                         │
+│  │   Objects    │   │   Features   │   │   Temporal   │                         │
+│  └──────┬───────┘   └──────┬───────┘   └──────┬───────┘                         │
+│         └──────────────────┼──────────────────┘                                  │
+│                            ▼                                                     │
+│  SKILL DISCOVERY (New)                                                           │
+│  ├─ Segment demos at object-interaction boundaries (SAM3)                        │
+│  ├─ Cluster segments by DINOv3 features → primitives                             │
+│  └─ Learn temporal structure with V-JEPA2 → hierarchy                            │
+│                            ▼                                                     │
+│  COMPOSITIONAL TRAINING (New)                                                    │
+│  ├─ Train primitive policies on discovered segments                              │
+│  ├─ Learn composition operators (sequence, conditional)                          │
+│  └─ Enable novel task composition NOT seen in training                           │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Why This Matters
+
+| Approach | Training Data | Novel Tasks | Transfer |
+|----------|---------------|-------------|----------|
+| End-to-end VLA | O(n²) combinations | Fails | None |
+| **Compositional** | O(n) primitives | **Composes** | **Yes** |
+
+### Usage
+
+```python
+from src.training.compositional import CompositionalTrainer
+
+# Initialize with existing infrastructure
+trainer = CompositionalTrainer.for_jetson_thor()
+trainer.initialize()
+
+# Continuous learning from human trainers
+for demo in trainer.data_stream.stream_demos():
+    trainer.add_demo(demo)
+
+# Run full training pipeline
+result = trainer.train()
+
+# Compose novel task NOT seen in training!
+task = trainer.compose_novel_task("stack blocks by color while avoiding the cat")
+trainer.execute_composed_task(task, robot_state)
+```
+
+---
+
 ## Timing Contract
 
 ```
@@ -292,6 +358,12 @@ src/
 │   ├── dynamical_executor.py    # Simplified executor using Deep IL
 │   └── task_decomposer.py       # Long-horizon task decomposition
 │
+├── training/                    # Compositional Training
+│   └── compositional/           # Skill Discovery + Hierarchy Learning
+│       ├── skill_discovery.py   # SAM3+DINOv3+V-JEPA2 segmentation
+│       ├── hierarchical_imitation.py  # Build skill hierarchies
+│       └── compositional_trainer.py   # End-to-end training pipeline
+│
 ├── safety/                      # P0: Deterministic Safety
 │   ├── cbf/                     # Control Barrier Functions
 │   │   ├── barriers.py          # Collision, joint, velocity, force barriers
@@ -315,12 +387,15 @@ src/
 │   ├── recovery/                # POIR recovery
 │   └── deep_imitative_learning.py
 │
-├── meta_ai/                     # Meta AI Models
-│   ├── dinov3.py                # DINOv3 features
-│   ├── sam3.py                  # SAM3 segmentation
-│   └── vjepa2.py                # V-JEPA 2 world model
+├── meta_ai/                     # Meta AI Models (used by training)
+│   ├── dinov3.py                # DINOv3 features → skill clustering
+│   ├── sam3.py                  # SAM3 segmentation → object boundaries
+│   └── vjepa2.py                # V-JEPA 2 → temporal structure
 │
 ├── platform/                    # Hardware Platform
+│   ├── edge/
+│   │   ├── onvif_cameras.py     # Video capture for training
+│   │   └── manus_sdk.py         # Glove data for training
 │   └── jetson_thor.py           # Jetson Thor optimization
 │
 ├── core/                        # Core Utilities
