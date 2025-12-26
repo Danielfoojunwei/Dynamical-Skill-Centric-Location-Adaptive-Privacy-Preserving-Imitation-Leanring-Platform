@@ -193,6 +193,43 @@ SKILL_LIBRARY = {
 }
 ```
 
+### Runtime Verification (v0.8.0)
+
+**Postconditions are verified in the REAL WORLD before transitions.**
+
+Static contract verification is necessary but not sufficient. Runtime verification uses perception (SAM3, DINOv3, V-JEPA2) to verify that postconditions actually hold, and CBF to ensure transitions are safe.
+
+```python
+from src.composition.runtime import PostconditionVerifier, TransitionSafety
+from src.composition.runtime.transition_safety import RuntimeTransitionChecker
+
+# Create runtime checker with perception
+checker = RuntimeTransitionChecker.create(unified_perception=perception_pipeline)
+
+# After skill completes, verify postconditions ACTUALLY hold
+allowed, details = checker.verify_transition(
+    skill_from="grasp",
+    skill_to="lift",
+    postconditions=["holding(object)"],  # Verified via gripper force + SAM3
+    preconditions=["holding(object)"],
+    frame=current_camera_frame,
+    robot_state=current_robot_state,
+)
+
+if allowed:
+    executor.execute("lift", images, state)
+else:
+    # Handle failure with suggested recovery
+    recovery_action = details.get("suggested_recovery")  # e.g., "retry_grasp"
+    handle_recovery(recovery_action)
+```
+
+**Verification Methods:**
+- **SAM3**: Object presence, location, stacking relationships
+- **DINOv3**: Semantic state similarity verification
+- **Robot State**: Gripper position, force, end-effector position
+- **CBF**: Velocity continuity, force limits during transitions
+
 ---
 
 ## Deep Imitative Learning Stack
