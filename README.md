@@ -562,6 +562,312 @@ retract: GRIPPER_OPEN → PATH_CLEAR                 [0.3-3.0s]
 
 ---
 
+## Skill Policy Development
+
+How skills are discovered from demonstrations and trained into policies.
+
+### Skill Discovery Pipeline
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                     AUTOMATIC SKILL DISCOVERY PIPELINE                           │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  Human Demonstration                                                             │
+│       │                                                                          │
+│       ▼                                                                          │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐│
+│  │                    MULTI-MODAL BOUNDARY DETECTION                            ││
+│  │                                                                              ││
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐        ││
+│  │  │ SAM3        │  │ DINOv3      │  │ V-JEPA2     │  │ MANUS       │        ││
+│  │  │ Object      │  │ Semantic    │  │ Temporal    │  │ Contact     │        ││
+│  │  │ Segmentation│  │ Shifts      │  │ Discontin.  │  │ Events      │        ││
+│  │  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘        ││
+│  │         │                │                │                │                ││
+│  │         └────────────────┴────────────────┴────────────────┘                ││
+│  │                                   │                                          ││
+│  │                                   ▼                                          ││
+│  │                    ┌─────────────────────────────┐                          ││
+│  │                    │    BOUNDARY FUSION          │                          ││
+│  │                    │    Weighted voting          │                          ││
+│  │                    │    (visual=0.3, semantic=   │                          ││
+│  │                    │    0.25, temporal=0.25,     │                          ││
+│  │                    │    contact=0.2)             │                          ││
+│  │                    └─────────────────────────────┘                          ││
+│  │                                                                              ││
+│  └─────────────────────────────────────────────────────────────────────────────┘│
+│       │                                                                          │
+│       ▼                                                                          │
+│  Skill Boundaries (frame indices where skills change)                            │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Boundary Detection Methods
+
+| Method | Detects | Signal |
+|--------|---------|--------|
+| **SAM3 Object Masks** | Object appearance/disappearance in hand | Mask IoU change > 0.3 |
+| **DINOv3 Semantics** | Scene context changes | Feature distance > threshold |
+| **V-JEPA2 Temporal** | Motion discontinuities | Temporal gradient spike |
+| **MANUS Contact** | Grasp/release events | Contact force delta > 2N |
+
+### Skill Hierarchy Learning
+
+Skills are organized into 4 hierarchical levels:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                         SKILL HIERARCHY LEVELS                                   │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  Level 3: TASK                                                                   │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐│
+│  │  "make_coffee" = pour_water → add_grounds → brew → pour_cup                 ││
+│  │  Duration: 60-300s | Composition of complex skills                          ││
+│  └─────────────────────────────────────────────────────────────────────────────┘│
+│                                          │                                       │
+│  Level 2: COMPLEX                        ▼                                       │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐│
+│  │  "pour_water" = reach → grasp → lift → pour → place                         ││
+│  │  Duration: 5-30s | Sequence of basic skills with invariants                 ││
+│  └─────────────────────────────────────────────────────────────────────────────┘│
+│                                          │                                       │
+│  Level 1: BASIC                          ▼                                       │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐│
+│  │  "grasp" = approach + close_gripper + verify_contact                        ││
+│  │  Duration: 0.5-5s | Atomic skill with pre/post conditions                   ││
+│  └─────────────────────────────────────────────────────────────────────────────┘│
+│                                          │                                       │
+│  Level 0: PRIMITIVE                      ▼                                       │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐│
+│  │  "move_joint_3" = single actuator command                                   ││
+│  │  Duration: <100ms | Direct motor control, safety-checked                    ││
+│  └─────────────────────────────────────────────────────────────────────────────┘│
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Policy Training Workflow
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                      SKILL POLICY TRAINING WORKFLOW                              │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  Phase 1: DISCOVERY                                                              │
+│  ───────────────────                                                             │
+│  demos/                          SkillDiscovery()                                │
+│  ├─ demo_001.h5                      │                                           │
+│  ├─ demo_002.h5    ─────────────────►│────► skill_segments.json                 │
+│  └─ demo_003.h5                      │      (boundaries, labels)                 │
+│                                                                                  │
+│  Phase 2: HIERARCHY LEARNING                                                     │
+│  ──────────────────────────────                                                  │
+│  skill_segments.json             HierarchyLearner()                              │
+│        │                              │                                          │
+│        └─────────────────────────────►│────► skill_graph.pkl                    │
+│                                       │      (parent-child, compositions)        │
+│                                                                                  │
+│  Phase 3: PRIMITIVE TRAINING                                                     │
+│  ────────────────────────────                                                    │
+│  Per skill segment               Pi0.5 + Diffusion Policy                        │
+│        │                              │                                          │
+│        └─────────────────────────────►│────► skill_primitive_001.pt             │
+│                                       │      (π(a|s) for each primitive)         │
+│                                                                                  │
+│  Phase 4: COMPOSITION TRAINING                                                   │
+│  ──────────────────────────────                                                  │
+│  skill_graph.pkl                 CompositionalTrainer()                          │
+│  skill_primitive_*.pt                 │                                          │
+│        │                              │                                          │
+│        └─────────────────────────────►│────► composition_policies/              │
+│                                       │      ├─ complex_pour.pt                  │
+│                                       │      └─ task_make_coffee.pt              │
+│                                                                                  │
+│  Phase 5: MoE INTEGRATION                                                        │
+│  ────────────────────────                                                        │
+│  All trained policies            MoERouter.add_expert()                          │
+│        │                              │                                          │
+│        └─────────────────────────────►│────► skill_library_v0.9.0.pt            │
+│                                       │      (16+ expert MoE)                    │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Training Configuration (`src/composition/training/compositional_trainer.py`)
+
+```python
+CompositionalTrainer(
+    # Primitive training
+    primitive_epochs=100,
+    primitive_lr=1e-4,
+
+    # Composition training
+    composition_epochs=50,
+    sequence_loss_weight=0.3,     # Penalize wrong skill ordering
+    transition_loss_weight=0.2,   # Smooth skill transitions
+
+    # Hierarchy constraints
+    enforce_preconditions=True,   # Hard constraint on skill contracts
+    max_composition_depth=4,      # Max nesting level
+)
+```
+
+---
+
+## Mixture-of-Experts (MoE) Skill Router
+
+How skills are selected and blended at runtime.
+
+### MoE Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                        MoE SKILL ROUTER ARCHITECTURE                             │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  Input: Task embedding + Scene context + Robot state                             │
+│                    │                                                             │
+│                    ▼                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐│
+│  │                         GATING NETWORK                                       ││
+│  │                                                                              ││
+│  │  Linear(input_dim, hidden) → ReLU → Dropout(0.1)                            ││
+│  │           │                                                                  ││
+│  │           ▼                                                                  ││
+│  │  Linear(hidden, num_experts) → Softmax + Noise (training)                   ││
+│  │           │                                                                  ││
+│  │           ▼                                                                  ││
+│  │  Gate weights: [g₁, g₂, ..., g₁₆]  (sum = 1.0)                              ││
+│  │                                                                              ││
+│  └─────────────────────────────────────────────────────────────────────────────┘│
+│                    │                                                             │
+│                    ▼                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐│
+│  │                      TOP-K SELECTION (k=3)                                   ││
+│  │                                                                              ││
+│  │  From 16 experts, select top 3 by gate weight:                              ││
+│  │  Example: grasp(0.45), reach(0.30), lift(0.15)                              ││
+│  │                                                                              ││
+│  │  Renormalize: grasp(0.50), reach(0.33), lift(0.17)                          ││
+│  │                                                                              ││
+│  └─────────────────────────────────────────────────────────────────────────────┘│
+│                    │                                                             │
+│                    ▼                                                             │
+│  ┌─────────────────────────────────────────────────────────────────────────────┐│
+│  │                      EXPERT EVALUATION                                       ││
+│  │                                                                              ││
+│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐                          ││
+│  │  │ Expert 1    │  │ Expert 2    │  │ Expert 3    │                          ││
+│  │  │ grasp       │  │ reach       │  │ lift        │                          ││
+│  │  │ π₁(a|s)     │  │ π₂(a|s)     │  │ π₃(a|s)     │                          ││
+│  │  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘                          ││
+│  │         │ ×0.50          │ ×0.33          │ ×0.17                            ││
+│  │         └────────────────┴────────────────┘                                  ││
+│  │                          │                                                   ││
+│  │                          ▼                                                   ││
+│  │                 Blended Action = Σ gᵢ × πᵢ(a|s)                             ││
+│  │                                                                              ││
+│  └─────────────────────────────────────────────────────────────────────────────┘│
+│                    │                                                             │
+│                    ▼                                                             │
+│  Output: Action command (to CBF safety filter)                                   │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Expert-to-Skill Mapping
+
+| Expert ID | Skill Type | Trained On | Specialization |
+|-----------|------------|------------|----------------|
+| 0-3 | **Manipulation** | 50k demos | grasp, place, push, pull |
+| 4-6 | **Navigation** | 30k demos | reach, retract, move_to |
+| 7-9 | **Pouring/Transfer** | 20k demos | pour, scoop, transfer |
+| 10-12 | **Tool Use** | 15k demos | use_tool, insert, rotate |
+| 13-15 | **Assembly** | 10k demos | stack, align, connect |
+
+### Gating Network Details (`src/platform/cloud/moe_skill_router.py`)
+
+```python
+MoEGatingNetwork:
+  input_dim: 768           # Concatenated embedding size
+  hidden_dim: 256          # Gating hidden layer
+  num_experts: 16          # Total skill experts
+  top_k: 3                 # Experts activated per inference
+  noise_std: 0.1           # Exploration noise (training only)
+  temperature: 1.0         # Softmax temperature
+
+# Load balancing loss (prevents expert collapse)
+aux_loss = load_balancing_coefficient * variance(expert_usage)
+```
+
+### Routing Workflow
+
+```
+┌─────────────────────────────────────────────────────────────────────────────────┐
+│                          MoE ROUTING WORKFLOW                                    │
+├─────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                  │
+│  Step 1: TASK EMBEDDING                                                          │
+│  ──────────────────────                                                          │
+│  "Pick up the red cup" ───► Language Model ───► task_emb [256]                  │
+│                                                                                  │
+│  Step 2: SCENE CONTEXT                                                           │
+│  ─────────────────────                                                           │
+│  RGB Image ───► DINOv3 ───► scene_emb [256]                                     │
+│                                                                                  │
+│  Step 3: ROBOT STATE                                                             │
+│  ────────────────────                                                            │
+│  Joint positions + velocities ───► StateEncoder ───► state_emb [256]            │
+│                                                                                  │
+│  Step 4: GATING                                                                  │
+│  ──────────────                                                                  │
+│  Concat([task_emb, scene_emb, state_emb]) ───► GatingNetwork ───► weights [16]  │
+│                                                                                  │
+│  Step 5: TOP-K SELECTION                                                         │
+│  ───────────────────────                                                         │
+│  weights [16] ───► TopK(k=3) ───► selected_experts [3], selected_weights [3]    │
+│                                                                                  │
+│  Step 6: EXPERT FORWARD PASS                                                     │
+│  ───────────────────────────                                                     │
+│  For each selected expert:                                                       │
+│    action_i = expert_i.forward(observation)                                      │
+│                                                                                  │
+│  Step 7: WEIGHTED BLEND                                                          │
+│  ─────────────────────                                                           │
+│  final_action = Σ (weight_i × action_i) / Σ weight_i                            │
+│                                                                                  │
+│  Step 8: SAFETY FILTER                                                           │
+│  ─────────────────────                                                           │
+│  final_action ───► CBF Filter ───► safe_action (guaranteed h(x) ≥ 0)            │
+│                                                                                  │
+└─────────────────────────────────────────────────────────────────────────────────┘
+```
+
+### MoE Configuration
+
+```python
+# Cloud config (training)
+MoESkillRouter(
+    num_experts=16,
+    top_k=3,                      # Sparse activation
+    capacity_factor=1.25,         # Expert capacity buffer
+    load_balancing_coef=0.01,     # Prevent expert collapse
+    expert_dropout=0.0,           # No dropout at inference
+)
+
+# Edge config (inference)
+MoESkillRouter.load_for_edge(
+    cache_path="/var/lib/dynamical/skill_cache",
+    preload_experts=[0,1,2,4,5],  # Commonly used skills
+    lazy_load=True,               # Load others on-demand
+)
+```
+
+---
+
 ## Federated Learning Pipeline
 
 Privacy-preserving distributed training across robot fleet.
