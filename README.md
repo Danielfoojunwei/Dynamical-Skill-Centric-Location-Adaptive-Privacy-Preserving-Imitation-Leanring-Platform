@@ -15,6 +15,42 @@
 - **Compositional Skills**: Verified skill chaining with formal contracts
 - **Deep Imitative Learning**: Diffusion Planner + RIP + POIR integration
 - **Pi0.5 VLA**: Official Physical Intelligence integration via openpi
+- **No Skill Blending**: VLA handles multi-objective implicitly (blending deprecated)
+
+---
+
+## Key Architectural Decision: No Skill Blending
+
+**v0.8.0 eliminates skill blending entirely.** The VLA learns multi-objective behavior implicitly.
+
+```
+OLD (v0.7.x - Skill Blending):                 NEW (v0.8.0 - Deep IL):
+──────────────────────────────                 ────────────────────────
+skill_grasp.infer() → action_1                 vla.infer(instruction) → action
+skill_avoid.infer() → action_2                 diffusion.refine(action) → trajectory
+blender.blend([a1,a2], weights) → blended      cbf.filter(trajectory) → safe_action
+safety.filter(blended) → safe_action
+
+Problems with blending:                        Why Deep IL is better:
+- Jitter and oscillations                      - VLA learns multi-objective from demos
+- Boundary instability                         - No runtime weight tuning needed
+- Fragile weight tuning                        - Smooth trajectories from diffusion
+- Safety guarantees break down                 - Hard safety from CBF
+```
+
+For long-horizon tasks, use **sequential decomposition** (not blending):
+```python
+from src.execution import DynamicalExecutor
+
+executor = DynamicalExecutor.for_jetson_thor()
+
+# Simple task - direct execution
+result = executor.execute("pick up the red cup", images, state)
+
+# Complex task - auto-decomposed into sequential sub-tasks
+result = executor.execute("set the table for dinner", images, state)
+# Internally: ["get plates", "place plates", "get utensils", ...]
+```
 
 ---
 
@@ -252,6 +288,10 @@ robot.send_command(safe_result.action)  # GUARANTEED safe
 
 ```
 src/
+├── execution/                   # Main Execution Layer (NO SKILL BLENDING)
+│   ├── dynamical_executor.py    # Simplified executor using Deep IL
+│   └── task_decomposer.py       # Long-horizon task decomposition
+│
 ├── safety/                      # P0: Deterministic Safety
 │   ├── cbf/                     # Control Barrier Functions
 │   │   ├── barriers.py          # Collision, joint, velocity, force barriers
@@ -263,10 +303,10 @@ src/
 │   │   └── monitor.py           # LTL/MTL monitoring
 │   └── executor.py              # SafePolicyExecutor integration
 │
-├── composition/                 # Compositional Skills
-│   ├── contracts.py             # Skill contracts
+├── composition/                 # Sequential Task Chaining (NOT blending)
+│   ├── contracts.py             # Task contracts
 │   ├── verifier.py              # Composition verification
-│   └── library.py               # Skill library
+│   └── library.py               # Task library
 │
 ├── spatial_intelligence/        # Deep Imitative Learning
 │   ├── pi0/                     # Pi0.5 VLA (Physical Intelligence)
@@ -282,6 +322,9 @@ src/
 │
 ├── platform/                    # Hardware Platform
 │   └── jetson_thor.py           # Jetson Thor optimization
+│
+├── core/                        # Core Utilities
+│   └── skill_blender.py         # DEPRECATED - use DynamicalExecutor
 │
 └── product/                     # Application Layer
     ├── task_api.py              # Task execution API

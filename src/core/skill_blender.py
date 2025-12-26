@@ -1,6 +1,38 @@
 """
-Skill Blender - Stable Multi-Skill Blending with Safety Guarantees
+Skill Blender - DEPRECATED (v0.8.0)
 
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                            DEPRECATION NOTICE                               │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  This module is DEPRECATED as of v0.8.0.                                    │
+│                                                                             │
+│  With Deep Imitative Learning (Pi0.5 VLA), skill blending is obsolete:      │
+│  - VLA learns multi-objective behavior implicitly from demonstrations       │
+│  - No need to blend "grasp" + "avoid collision" at runtime                  │
+│  - Model learns to grasp while avoiding collisions from training data       │
+│                                                                             │
+│  Use instead:                                                               │
+│    from src.execution import DynamicalExecutor                              │
+│    executor = DynamicalExecutor.for_jetson_thor()                           │
+│    result = executor.execute(instruction, images, state)                    │
+│                                                                             │
+│  For long-horizon tasks, use TaskDecomposer for SEQUENTIAL chaining:        │
+│    from src.execution import TaskDecomposer                                 │
+│                                                                             │
+│  The fundamental problem with blending:                                     │
+│  - Combining outputs from multiple skills causes jitter & oscillations      │
+│  - Safety guarantees break down at skill boundaries                         │
+│  - Weight tuning is fragile and task-specific                               │
+│                                                                             │
+│  The solution (v0.8.0):                                                     │
+│  - VLA handles multi-objective internally                                   │
+│  - CBF provides hard safety guarantees                                      │
+│  - TaskDecomposer handles sequential sub-task chaining                      │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Original docstring (v0.7.1):
 Implements the defensive skill blending described in README v0.7.1:
 1. All skills output normalized actions in [-1, 1]
 2. All skills use same action space (verified at registration)
@@ -11,6 +43,15 @@ Implements the defensive skill blending described in README v0.7.1:
 This module addresses the critique: "naive blending is a standard way to
 create jitter, oscillations, and unsafe boundary behavior."
 """
+
+import warnings
+warnings.warn(
+    "SkillBlender is deprecated as of v0.8.0. "
+    "Use DynamicalExecutor with Deep Imitative Learning instead. "
+    "VLA handles multi-objective behavior implicitly.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 import time
 import logging
