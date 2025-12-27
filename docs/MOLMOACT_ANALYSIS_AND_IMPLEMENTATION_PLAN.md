@@ -4,7 +4,7 @@
 
 This document provides a comprehensive analysis of **MolmoAct** (Action Reasoning Models) from Allen Institute for AI and compares it with our current Dynamical Edge Platform architecture. We identify key innovations that can significantly enhance our system and propose a detailed implementation roadmap.
 
-**Key Insight**: MolmoAct introduces a revolutionary **three-stage pipeline** (Perception → Planning → Action) with **depth-aware perception tokens** and **visual waypoint traces**—capabilities that directly address limitations in our current Pi0.5-based VLA approach.
+**Key Insight**: MolmoAct introduces a revolutionary **three-stage pipeline** (Perception → Planning → Action) with **depth-aware perception tokens** and **visual waypoint traces**. While we already have **Depth Anything V3** for metric depth estimation, MolmoAct's key innovation is using depth to create **spatial tokens** that are fed directly into the action model—something our current Pi0.5 pipeline does not do.
 
 ---
 
@@ -190,6 +190,7 @@ Action: [joint_angles] + [gripper_close]
 | **Privacy Preservation** | 7-stage FL pipeline with N2HE encryption | `src/moai/n2he.py`, `src/platform/cloud/federated_learning.py` |
 | **Skill-Centric Design** | MoE routing, compositional verification | `src/platform/cloud/moe_skill_router.py` |
 | **Multi-Tier Control** | Clear separation (1kHz→200Hz→10Hz→1Hz→async) | `src/robot_runtime/agent.py` |
+| **Depth Anything V3** | TensorRT-accelerated metric depth estimation with depth-pose fusion | `src/core/depth_estimation/depth_anything_v3.py`, `src/core/depth_estimation/depth_pose_fusion.py` |
 | **Diffusion Refinement** | Trajectory smoothing via score networks | `src/spatial_intelligence/planning/diffusion_planner.py` |
 | **OOD Detection + Recovery** | RIP gating + POIR recovery | `src/spatial_intelligence/safety/rip_gating.py` |
 | **Offline Operation** | Full functionality with cached skills | Architecture design |
@@ -198,11 +199,11 @@ Action: [joint_angles] + [gripper_close]
 
 | Limitation | Impact | Root Cause |
 |------------|--------|------------|
-| **No depth-aware perception** | Limited 3D reasoning | Pi0.5 uses RGB only |
+| **Depth not integrated into VLA** | Depth available but not used for action prediction | Pi0.5 takes RGB only, depth used separately for pose fusion |
 | **No explicit planning stage** | Black-box action prediction | VLA end-to-end design |
 | **No visual trace explanations** | Hard to debug failures | No intermediate representations |
 | **No user-steerable plans** | Can't adjust behavior in real-time | No waypoint interface |
-| **Limited OOD generalization** | Struggles with novel scenes | No spatial reasoning grounding |
+| **Limited OOD generalization** | Struggles with novel scenes | No spatial reasoning grounding in action model |
 | **Single embodiment training** | Poor transfer to new robots | No embodiment decoupling |
 
 ---
@@ -213,8 +214,8 @@ Action: [joint_angles] + [gripper_close]
 
 | Feature | MolmoAct | Our System | Gap |
 |---------|----------|------------|-----|
-| **Input Modalities** | RGB + Depth | RGB only | **CRITICAL** |
-| **Vision Encoder** | VQVAE (depth-aware tokens) | DINOv3 (semantic features) | MODERATE |
+| **Input Modalities** | RGB + Depth → unified tokens | RGB + Depth (separate paths) | **INTEGRATION** |
+| **Vision Encoder** | VQVAE (depth-aware tokens) | DINOv3 + Depth Anything V3 (not fused for actions) | MODERATE |
 | **Planning Representation** | Image-space waypoints | None (implicit) | **CRITICAL** |
 | **Action Head** | Embodiment-specific decoder | Pi0.5 direct output | MODERATE |
 | **Reasoning Chain** | Explicit CoT annotations | None | **HIGH** |
@@ -249,11 +250,12 @@ Action: [joint_angles] + [gripper_close]
 
 ### 4.1 Critical Gaps (Must Address)
 
-#### Gap 1: No Depth-Aware Perception
-- **Current**: RGB images → DINOv3 semantic features → Pi0.5
-- **Problem**: Cannot estimate distances, collisions, 3D positions
-- **Impact**: Poor performance on spatial reasoning tasks
-- **MolmoAct Solution**: VQVAE with depth + positional embeddings
+#### Gap 1: Depth Not Integrated into Action Model
+- **Current**: RGB → Pi0.5 VLA (separate path: RGB → Depth Anything V3 → pose fusion only)
+- **Problem**: Depth Anything V3 exists but is only used for pose fusion, NOT for action prediction
+- **Impact**: VLA lacks 3D spatial reasoning for manipulation tasks
+- **MolmoAct Solution**: VQVAE creates spatial tokens from RGBD that are fed INTO the action model
+- **Our Advantage**: We already have Depth Anything V3 running at 30Hz on Jetson—just need to integrate it
 
 #### Gap 2: No Explicit Planning Stage
 - **Current**: Direct observation → action mapping (black-box)
@@ -293,36 +295,57 @@ Action: [joint_angles] + [gripper_close]
 
 Based on the gap analysis, here are the prioritized innovations from MolmoAct to integrate:
 
-### 5.1 Priority 1: Depth-Aware Perception Module
+### 5.1 Priority 1: Spatial Tokenizer for VLA Integration
 
-**What**: Add depth perception and spatial tokenization
+**What**: Create spatial tokens from existing Depth Anything V3 output and integrate with action model
+
+**We Already Have**:
+- ✅ `src/core/depth_estimation/depth_anything_v3.py` - TensorRT-accelerated metric depth
+- ✅ `src/core/depth_estimation/depth_pose_fusion.py` - Depth-pose fusion for 3D reconstruction
+- ✅ Point cloud generation capability
+- ✅ Bilinear depth sampling at keypoint locations
+
+**What's Missing**: Spatial tokens that feed INTO the VLA for action prediction
 
 **Implementation Approach**:
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│                    NEW: Depth-Aware Perception Pipeline                  │
+│                    NEW: Spatial Token Integration                        │
 ├─────────────────────────────────────────────────────────────────────────┤
 │                                                                          │
-│  ┌──────────┐   ┌──────────┐   ┌────────────────────────────────────┐   │
-│  │ RGB      │   │ Depth    │   │                                    │   │
-│  │ Camera   │   │ (Stereo/ │   │         SPATIAL TOKENIZER          │   │
-│  │ Stream   │   │ ToF/Est) │   │  ┌───────────────────────────────┐ │   │
-│  └────┬─────┘   └────┬─────┘   │  │ Option A: Pre-trained VQVAE   │ │   │
-│       │              │         │  │ Option B: DINOv3 + Depth MLP  │ │   │
-│       └──────┬───────┘         │  │ Option C: DepthAnything v2    │ │   │
-│              │                 │  └───────────────────────────────┘ │   │
-│              ▼                 │                                    │   │
-│     ┌─────────────────┐        │  Output: Spatial Perception Tokens │   │
-│     │ RGBD Fusion     │ ─────→ │  [S₁, S₂, ... Sₙ] with 3D coords  │   │
-│     └─────────────────┘        └────────────────────────────────────┘   │
+│  ┌──────────────────┐   ┌──────────────────┐                             │
+│  │ DINOv3 Features  │   │ Depth Anything   │  ← ALREADY HAVE BOTH       │
+│  │ (semantic)       │   │ V3 (metric depth)│                             │
+│  └────────┬─────────┘   └────────┬─────────┘                             │
+│           │                      │                                       │
+│           └──────────┬───────────┘                                       │
+│                      │                                                   │
+│                      ▼                                                   │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │               NEW: SPATIAL TOKEN ENCODER                         │    │
+│  │  ┌─────────────────────────────────────────────────────────────┐│    │
+│  │  │ Option A: DINOv3 features + depth channel concatenation     ││    │
+│  │  │ Option B: Learned fusion MLP (semantic + depth → tokens)    ││    │
+│  │  │ Option C: VQVAE tokenizer (like MolmoAct) for discretization││    │
+│  │  └─────────────────────────────────────────────────────────────┘│    │
+│  │                                                                  │    │
+│  │  Output: Spatial Perception Tokens [S₁, S₂, ... Sₙ]             │    │
+│  │          Each token has: (semantic_features, x, y, depth, normal)│    │
+│  └─────────────────────────────────────────────────────────────────┘    │
+│                      │                                                   │
+│                      ▼                                                   │
+│  ┌─────────────────────────────────────────────────────────────────┐    │
+│  │               MODIFIED: VLA with Spatial Conditioning            │    │
+│  │  Pi0.5 or custom ARM that accepts spatial tokens as input        │    │
+│  └─────────────────────────────────────────────────────────────────┘    │
 │                                                                          │
 └──────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Key Files to Modify**:
-- `src/meta_ai/` - Add depth estimation model (DepthAnything v2 or Metric3D)
-- `src/spatial_intelligence/` - Add spatial tokenizer
-- `src/spatial_intelligence/pi0/pi05_model.py` - Integrate spatial tokens
+**Key Files to Create/Modify**:
+- `src/spatial_intelligence/spatial_tokenizer.py` - NEW: Fuse DINOv3 + Depth → spatial tokens
+- `src/spatial_intelligence/pi0/pi05_model.py` - MODIFY: Accept spatial tokens as additional input
+- `src/core/depth_estimation/depth_anything_v3.py` - REUSE: Already implemented!
 
 ### 5.2 Priority 2: Visual Waypoint Planning Stage
 
@@ -502,25 +525,31 @@ class ReasoningAnnotation:
 
 ### 6.1 Phase 1: Foundation (Weeks 1-4)
 
-#### Milestone 1.1: Depth Perception Integration
+#### Milestone 1.1: Spatial Tokenizer & VLA Integration
 
-**Objective**: Add depth sensing and depth-aware features to perception pipeline
+**Objective**: Create spatial tokens from existing Depth Anything V3 and integrate with action model
+
+**Already Complete** (from existing codebase):
+- ✅ Depth Anything V3 TensorRT inference (`src/core/depth_estimation/depth_anything_v3.py`)
+- ✅ Depth-pose fusion (`src/core/depth_estimation/depth_pose_fusion.py`)
+- ✅ Point cloud generation
+- ✅ DINOv3 feature extraction (`src/meta_ai/dinov3.py`)
 
 **Tasks**:
 
 | Task | Description | Files | Effort |
 |------|-------------|-------|--------|
-| 1.1.1 | Integrate DepthAnything v2 for monocular depth estimation | `src/meta_ai/depth_anything.py` | 3 days |
-| 1.1.2 | Add depth camera support (RealSense D435i, ZED) | `src/drivers/depth_cameras.py` | 2 days |
-| 1.1.3 | Create RGBD fusion module | `src/spatial_intelligence/rgbd_fusion.py` | 2 days |
-| 1.1.4 | Implement spatial tokenizer | `src/spatial_intelligence/spatial_tokenizer.py` | 4 days |
-| 1.1.5 | Integrate with existing perception pipeline | `src/pipeline/integrated_pipeline.py` | 2 days |
-| 1.1.6 | Unit tests and benchmarks | `tests/test_depth_perception.py` | 2 days |
+| 1.1.1 | Create spatial tokenizer (DINOv3 + Depth Anything V3 fusion) | `src/spatial_intelligence/spatial_tokenizer.py` | 4 days |
+| 1.1.2 | Add positional encoding for 3D coordinates | `src/spatial_intelligence/spatial_tokenizer.py` | 2 days |
+| 1.1.3 | Create VLA adapter to accept spatial tokens | `src/spatial_intelligence/pi0/spatial_adapter.py` | 3 days |
+| 1.1.4 | Integrate spatial tokenizer with DIL pipeline | `src/spatial_intelligence/deep_imitative_learning.py` | 2 days |
+| 1.1.5 | Benchmark latency on Jetson Thor | `tests/benchmark_spatial_tokens.py` | 1 day |
+| 1.1.6 | Unit tests | `tests/test_spatial_tokenizer.py` | 1 day |
 
 **Deliverables**:
-- DepthAnything v2 running on Jetson Thor at 30Hz
-- Spatial tokens with 3D position encoding
-- Integration with existing DINOv3 features
+- Spatial tokenizer producing tokens with (semantic_features, x, y, z, normal)
+- VLA adapter for conditioning action prediction on spatial tokens
+- End-to-end integration with existing depth pipeline
 
 #### Milestone 1.2: Waypoint Planner Prototype
 
