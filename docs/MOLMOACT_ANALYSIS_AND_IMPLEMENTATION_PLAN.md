@@ -519,6 +519,95 @@ class ReasoningAnnotation:
 - `src/spatial_intelligence/action_decoder/franka_decoder.py` - Franka specific
 - `src/spatial_intelligence/action_decoder/registry.py` - Decoder registry
 
+### 5.5 Priority 5: Action Generation Improvements (Diffusion → Flow Matching)
+
+**Key Insight**: MolmoAct does NOT use diffusion—it uses discrete tokenization with autoregressive prediction. However, **Pi0/Pi0.5 uses Flow Matching**, which is more relevant to our diffusion planner.
+
+**What We Currently Have**:
+```
+Pi0.5 VLA → Actions (16-step horizon)
+         ↓
+    Diffusion Planner (50-100 denoising steps)
+         ↓
+    Refined Trajectory
+```
+
+**What We Can Learn Without Changing Everything**:
+
+#### A. Flow Matching vs Traditional Diffusion
+
+| Aspect | Our Diffusion Planner | Pi0 Flow Matching | Improvement |
+|--------|----------------------|-------------------|-------------|
+| **Denoising steps** | 50-100 steps | 10 steps | **5-10x faster** |
+| **Training objective** | Score matching | Vector field matching | Simpler, more stable |
+| **Action representation** | Continuous | Continuous | Same |
+| **Inference** | DDPM sampling | Forward Euler integration | More efficient |
+
+**Flow Matching Upgrade** (drop-in replacement for diffusion):
+```python
+# Current: DDPM-style diffusion (many steps)
+for t in reversed(range(100)):
+    score = model(x, t)
+    x = denoise_step(x, score, t)
+
+# Upgraded: Flow Matching (10 steps)
+for τ in [0.0, 0.1, 0.2, ..., 0.9, 1.0]:
+    v = model(x, τ, condition)
+    x = x + 0.1 * v  # Forward Euler
+```
+
+#### B. Action Chunking (from Pi0)
+
+| Aspect | Our System | Pi0 | Recommendation |
+|--------|-----------|-----|----------------|
+| **Horizon** | 16 actions | 50 actions | Increase to 50 |
+| **Frequency** | 10 Hz | 50 Hz | Higher chunk = smoother |
+| **Latency hiding** | Limited | 1-2.5s lookahead | Better |
+
+#### C. Waypoint-Conditioned Action Generation (from MolmoAct)
+
+Even though MolmoAct uses autoregressive, the key idea of **conditioning on waypoints** can improve our diffusion:
+
+```
+CURRENT:
+    RGB → VLA → Actions → Diffusion(condition=scene_features) → Refined
+
+IMPROVED:
+    RGB → VLA → Actions
+                    ↓
+    Depth → Waypoint Predictor → Waypoints
+                    ↓
+    Diffusion(condition=[scene_features, waypoints, depth]) → Refined
+```
+
+#### D. KV Caching for Faster Inference
+
+Pi0 caches attention keys/values for observations, recomputing only action tokens:
+
+```python
+# Cache observation embeddings (computed once per frame)
+kv_cache = model.encode_observation(rgb, depth, proprio)
+
+# Each denoising step only recomputes action tokens
+for step in range(10):
+    actions = model.decode_actions(actions_noisy, kv_cache)
+```
+
+**Key Files to Modify**:
+- `src/spatial_intelligence/planning/diffusion_planner.py` - Upgrade to flow matching
+- `src/spatial_intelligence/planning/flow_matching.py` - NEW: Flow matching implementation
+- `src/spatial_intelligence/planning/waypoint_conditioner.py` - NEW: Waypoint conditioning
+
+**Implementation Options** (in order of complexity):
+
+| Option | Changes | Speedup | Risk |
+|--------|---------|---------|------|
+| **A: Keep diffusion, add waypoint conditioning** | Low | 1.2x | Low |
+| **B: Switch to flow matching (10 steps)** | Medium | 5-10x | Medium |
+| **C: Full Pi0-style with action chunking + KV cache** | High | 10x+ | Medium |
+
+**Recommended Approach**: Start with Option A, then upgrade to B.
+
 ---
 
 ## 6. Implementation Plan
