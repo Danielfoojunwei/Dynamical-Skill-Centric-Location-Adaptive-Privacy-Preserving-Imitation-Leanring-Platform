@@ -165,6 +165,33 @@ except ImportError as e:
     DILResult = None
     ExecutionMode = None
 
+# =============================================================================
+# Visual Trace (MolmoAct-Inspired Steerability)
+# =============================================================================
+try:
+    from .visual_trace import (
+        VisualTrace,
+        VisualTraceConfig,
+        VisualTraceRenderer,
+        TraceModifier,
+        Waypoint,
+        WaypointType,
+        TraceStyle,
+        create_visual_trace,
+        modify_trace_with_language,
+    )
+except ImportError as e:
+    logger.debug(f"Visual Trace not available: {e}")
+    VisualTrace = None
+    VisualTraceConfig = None
+    VisualTraceRenderer = None
+    TraceModifier = None
+    Waypoint = None
+    WaypointType = None
+    TraceStyle = None
+    create_visual_trace = None
+    modify_trace_with_language = None
+
 
 __all__ = [
     # Pi0.5 Official
@@ -211,4 +238,15 @@ __all__ = [
     'DILConfig',
     'DILResult',
     'ExecutionMode',
+
+    # Visual Trace (MolmoAct-Inspired)
+    'VisualTrace',
+    'VisualTraceConfig',
+    'VisualTraceRenderer',
+    'TraceModifier',
+    'Waypoint',
+    'WaypointType',
+    'TraceStyle',
+    'create_visual_trace',
+    'modify_trace_with_language',
 ]

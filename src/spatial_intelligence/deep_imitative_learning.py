@@ -105,6 +105,21 @@ except ImportError:
     RecoveryPlan = None
     RecoveryStatus = None
 
+try:
+    from .visual_trace import (
+        VisualTraceRenderer,
+        VisualTraceConfig,
+        VisualTrace,
+        TraceModifier,
+    )
+    HAS_VISUAL_TRACE = True
+except ImportError:
+    HAS_VISUAL_TRACE = False
+    VisualTraceRenderer = None
+    VisualTraceConfig = None
+    VisualTrace = None
+    TraceModifier = None
+
 
 class ExecutionMode(Enum):
     """Execution mode for the pipeline."""
@@ -179,6 +194,9 @@ class DILResult:
     refined_trajectory: Optional[Any] = None  # Diffusion output
     safety_decision: Optional[Any] = None  # RIP output
 
+    # Visual trace (MolmoAct-inspired steerability)
+    visual_trace: Optional[Any] = None  # VisualTrace for operator preview
+
     # Recovery info
     needs_recovery: bool = False
     recovery_plan: Optional[Any] = None
@@ -188,6 +206,7 @@ class DILResult:
     vla_time_ms: float = 0.0
     diffusion_time_ms: float = 0.0
     safety_time_ms: float = 0.0
+    trace_time_ms: float = 0.0  # Visual trace rendering time
 
 
 class DeepImitativeLearning:
@@ -210,6 +229,11 @@ class DeepImitativeLearning:
         self.diffusion: Optional[DiffusionPlanner] = None
         self.safety: Optional[RIPGating] = None
         self.recovery: Optional[POIRRecovery] = None
+        
+        # Visual trace renderer (MolmoAct-inspired)
+        self.trace_renderer: Optional[VisualTraceRenderer] = None
+        self.trace_modifier: Optional[TraceModifier] = None
+        self._current_trace: Optional[VisualTrace] = None
 
         # State
         self.mode = ExecutionMode.NORMAL
@@ -225,6 +249,7 @@ class DeepImitativeLearning:
             "safe_executions": 0,
             "recoveries_triggered": 0,
             "avg_total_time_ms": 0.0,
+            "traces_generated": 0,
         }
 
     def load(self):
@@ -289,6 +314,12 @@ class DeepImitativeLearning:
                     lambda obs: self.safety.evaluate(obs).ood_score
                 )
             logger.info("Initialized POIR Recovery")
+
+        # Initialize Visual Trace Renderer (MolmoAct-inspired)
+        if HAS_VISUAL_TRACE and VisualTraceRenderer is not None:
+            self.trace_renderer = VisualTraceRenderer(VisualTraceConfig())
+            self.trace_modifier = TraceModifier(self.trace_renderer)
+            logger.info("Initialized Visual Trace Renderer")
 
         self._loaded = True
         logger.info("Deep Imitative Learning pipeline ready")
@@ -371,6 +402,18 @@ class DeepImitativeLearning:
         # Update history
         self._update_history(images, refined_actions)
 
+        # Step 4: Generate visual trace (MolmoAct-inspired steerability)
+        trace_start = time.time()
+        visual_trace = None
+        if self.trace_renderer is not None and trajectory_batch is not None:
+            visual_trace = self.trace_renderer.render_trace(
+                trajectory=trajectory_batch.best,
+                image=images if HAS_NUMPY and hasattr(images, 'shape') else None,
+            )
+            self._current_trace = visual_trace
+            self.stats["traces_generated"] += 1
+        trace_time = (time.time() - trace_start) * 1000
+
         # Update stats
         total_time = (time.time() - start_time) * 1000
         if is_safe:
@@ -388,12 +431,14 @@ class DeepImitativeLearning:
             vla_actions=vla_actions,
             refined_trajectory=trajectory_batch,
             safety_decision=safety_decision,
+            visual_trace=visual_trace,
             needs_recovery=needs_recovery,
             recovery_plan=recovery_plan,
             total_time_ms=total_time,
             vla_time_ms=vla_time,
             diffusion_time_ms=diff_time,
             safety_time_ms=safety_time,
+            trace_time_ms=trace_time,
         )
 
     def _vla_inference(
@@ -469,6 +514,65 @@ class DeepImitativeLearning:
         """Set home position for recovery."""
         if self.recovery is not None:
             self.recovery.set_home_position(position)
+
+    # =========================================================================
+    # Visual Trace Methods (MolmoAct-Inspired Steerability)
+    # =========================================================================
+
+    def get_visual_trace(self) -> Optional[Any]:
+        """
+        Get the current visual trace for operator preview.
+        
+        Returns:
+            VisualTrace with waypoints and overlay, or None if not available
+        """
+        return self._current_trace
+
+    def modify_trace(self, command: str) -> Optional[Any]:
+        """
+        Modify the current trace using natural language.
+        
+        Args:
+            command: Natural language command (e.g., "move middle waypoint left")
+            
+        Returns:
+            Modified VisualTrace, or None if no trace available
+        """
+        if self._current_trace is None or self.trace_modifier is None:
+            logger.warning("No trace available to modify")
+            return None
+        
+        self._current_trace = self.trace_modifier.modify_trace(
+            self._current_trace,
+            command,
+        )
+        return self._current_trace
+
+    def get_modified_trajectory(self) -> Optional[Any]:
+        """
+        Get the trajectory from modified visual trace.
+        
+        Use this to execute operator-corrected trajectory.
+        
+        Returns:
+            Modified action trajectory [H, A], or None if no modifications
+        """
+        if self._current_trace is None:
+            return None
+        return self._current_trace.get_modified_trajectory()
+
+    def reset_trace(self) -> Optional[Any]:
+        """
+        Reset visual trace modifications to original.
+        
+        Returns:
+            Reset VisualTrace, or None if no trace available
+        """
+        if self._current_trace is None or self.trace_modifier is None:
+            return None
+        
+        self._current_trace = self.trace_modifier.reset_trace(self._current_trace)
+        return self._current_trace
 
     @property
     def is_loaded(self) -> bool:
