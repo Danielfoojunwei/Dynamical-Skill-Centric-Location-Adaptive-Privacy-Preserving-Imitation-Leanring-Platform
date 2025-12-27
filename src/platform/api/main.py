@@ -91,6 +91,14 @@ try:
 except ImportError as e:
     logger.warning(f"Integrator API router not available: {e}")
 
+# Include ARM API router for Action Reasoning Model pipeline
+try:
+    from .arm_api import router as arm_router
+    app.include_router(arm_router)
+    logger.info("ARM API router enabled - MolmoAct integration ready")
+except ImportError as e:
+    logger.warning(f"ARM API router not available: {e}")
+
 # Start Network Manager
 @app.on_event("startup")
 async def startup_event():
